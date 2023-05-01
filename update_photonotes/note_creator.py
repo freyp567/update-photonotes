@@ -105,8 +105,8 @@ class NoteCreator:
             logger.info(f"unknown license_id={photo.license!r} for {photo.urls}")
             license_info = f'License Type {photo.license}'
         elif photo.license != '0':
-            extratags.append("freepic")
-            extratags.append("license-%s" % license_info.replace('CC ', 'CC_').replace(' ', ''))
+            note_tags.add("freepic")
+            note_tags.add("license-%s" % license_info.replace('CC ', 'CC_').replace(' ', ''))
             license_info += f' (License Type {photo.license})'
         self.params['license_info'] = license_info
         if license_info and photo.license != '0':

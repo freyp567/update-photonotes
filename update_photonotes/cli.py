@@ -137,7 +137,7 @@ def update_db(
 @click.option(
     '--max-pos',
     type=int,
-    default=10000,
+    default=5000,
     help="for image lookup, limit number of flickr images to scan before giving up"
 )
 def create_note(

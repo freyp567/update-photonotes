@@ -12,9 +12,9 @@ from evernote_backup.note_formatter import NoteFormatter
 from evernote_backup.note_exporter_util import SafePath
 from evernote.edam.type.ttypes import Note
 
-from conversion import get_note_content
-from update_photonotes.flickr_types import FlickrImage, FlickrDate
-from update_photonotes.database import PhotoNotesDB
+from .conversion import get_note_content
+from .flickr_types import FlickrImage, FlickrDate
+from .database import PhotoNotesDB
 
 import logging
 LOGGER = logging.getLogger('updater.update')

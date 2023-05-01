@@ -10,9 +10,9 @@ from pathlib import Path
 import pyclip
 
 from update_photonotes.database import PhotoNotesDB
-from authenticate import authenticate
+#from authenticate import authenticate
 
-from list_site import SiteLister
+#from list_site import SiteLister
 
 
 
@@ -126,8 +126,8 @@ LOGGER = logging.getLogger('updater.main')
 #         input("check errors, and press any key to continue ... ")
 #         sys.exit(2)
 
-# transition to click in progress
-# for transition phase, delegate to new main
+# transition from argparse to click in progress
+# for transition phase, we provide a stub to delegate to new main
 if __name__ == '__main__':
     from update_photonotes.cli import main
     try:

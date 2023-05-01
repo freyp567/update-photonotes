@@ -21,18 +21,18 @@ so I picked this one for an example as I may share and adapt the image under the
 
 update-photonotes currently provides  two actions:
 
-### update 
+### update-db
 
 Extend the en_backup.db database by providing additional tables for inventory of the existing photo-notes in en_backup.db
 and update them from Flickr.
 
 The main issue with update is, that there needs to be a reliable way to identify the Flickr image a photo-note is 
-relating to. A note may contain many HTML links (<a href=...> Elements), but which one is the one identifying the image
+relating to. A note may contain many HTML links (````<a href=...>```` Elements), but which one is the one identifying the image
 described?
 
 The update action has to rely on heuristics, I choose the following one:
 First, every note must contain a line starting with "See: " and followed by a highlighted reference to the image.
-Secnodly, there must also be a HTML link for this image in the note, to be the last photo URL.
+Secondly, there must also be a HTML link for this image in the note, to be the last photo URL.
 
 Currently I still am busy with the job to make all my photo-notes complient to these two rules.
 Update currently scans all photo-notes tagged 'flickr-image' in en_backup.db and complains if the expectations are not met.
@@ -96,3 +96,92 @@ to create update-photonotes.
 Note that it is a commandline based application that requires some (hopefully minimal) knowledgbe of Python to make
 use of it. It still is under active development, as there are a couple of ideas I still want to implement and
 improve.
+
+
+## Usage example, create-note
+
+Here a usage sample for the create-note action. 
+Precondition is that you have your own Flickr API keys, and add it to a .env file (or the calling environment)
+There are three environment variables that are required
+
+DB_PATH=(your Path to ...)\evernote_backup_data
+API_KEY=(your Flickr API key)
+API_SECRET=(your Flickr API secret key)
+
+note that DB_PATH must point to a directory where the en_backup.db has been create using evernote-backup
+documentation can be found here
+[evernote-backup](https://pypi.org/project/evernote-backup/)
+and [vzhd1701/ evernote-backup](https://github.com/vzhd1701/evernote-backup)
+
+With these variables properly defined, the action create-note can be invoked as follows
+note: run it on a cmd.exe or Windows Terminal console, with current directory set to the project root dir
+(may also run on macOS, I am sure, but currently I have non at hand so I cannot test it there)
+
+Run from command line:
+
+python.exe main.py create-note https://www.flickr.com/photos/rod_waddington/49889542513/in/datetaken/
+
+
+This will produce the console output similar to that one:
+
+```
+2023-05-01 15:38:05,269 | [INFO] | 9748 | using evernote-backup db from F:\backup\Evernote\evernote_backup_data\en_backup.db
+2023-05-01 15:38:05,269 | [INFO] | 9748 | creating photonote for photo from URL 'https://www.flickr.com/photos/rod_waddington/49889542513/in/datetaken/'
+2023-05-01 15:38:05,269 | [INFO] | 9748 | authenticated using api_key='5d078f6c2d815c25891151b04782dd55'
+2023-05-01 15:38:05,269 | [INFO] | 9748 | create photo-note from https://www.flickr.com/photos/rod_waddington/49889542513/in/datetaken/
+2023-05-01 15:38:05,915 | [INFO] | 9748 | user for rod_waddington is 64607715@N05 / 'Rod Waddington' - #=11148
+2023-05-01 15:38:06,550 | [WARNING] | 9748 | lookup image 49889542513 in photostream
+2023-05-01 15:38:10,187 | [INFO] | 9748 | image found for 49889542513 at pos=2257
+2023-05-01 15:38:10,187 | [INFO] | 9748 | found photo-note / image for rod_waddington|49889542513
+2023-05-01 15:38:12,594 | [INFO] | 9748 | archiving 49889542513_5cfc6bb069_b.jpg size=Large ...
+2023-05-01 15:38:13,037 | [INFO] | 9748 | api cache stats:
+cache hits / misses:
+  _all: 3 / 14
+  flickr.people.getInfo: 3 / 1
+  flickr.people.getPhotos: 0 / 1
+  flickr.photos.geo.getLocation: 0 / 1
+  flickr.photos.getAllContexts: 0 / 1
+  flickr.photos.getInfo: 0 / 2
+  flickr.photos.search: 0 / 5
+  flickr.photosets.getInfo: 0 / 2
+  flickr.urls.lookupUser: 0 / 1
+
+.
+2023-05-01 15:38:13,037 | [INFO] | 9748 | created note in F:\backup\Evernote\evernote_backup_data\update_photonotes\import\rod_waddington 49889542513 .enex
+2023-05-01 15:38:13,038 | [INFO] | 9748 | create_note completed.
+```
+
+Note that it is still an early stage of development (wrote this code in my spare time last week) so output may be 
+still a little but verbose. I will strive to reduce and streamline it to what is of importance
+
+You see that due to the use of CountingAPIcallsCache - 
+it extens the (flickr_api´provided SimpleCache by cache hit/miss counting - we see that running create-note
+costs 14 API calls (17 actually, but 3 of them are eliminated by the caching mechanism)
+
+The number of API calls may depend on how far the Walker mechanism has to iterate over the photo stream to find the imag
+specified by the photo id in the URL. If it is an older image, it may take more calls, and I did hardcode a limit of
+5000 iamges, so if it is an odler image that is beyound that limit it may fail. Note that the photo stream of
+Rod Waddington conains currently over 11.659 public photos, so it is just a question how far you want to reach back
+in time to create notes from older photos. This limitation can be changed by setting --max-pos to a higher value,
+do so if you need ... but keep in mind there is the requirement to keep the number of API calls per hour below
+3.600 (see [The Flickr
+Developer Guide: API](https://www.flickr.com/services/developer/api/), quoted: 
+> API, Limits: 
+  Since the Flickr API is quite easy to use, it's also quite easy to abuse, which threatens all services 
+relying on the Flickr API. To help prevent this, we limit the access to the API per key. 
+If your application stays under 3600 queries per hour across the whole key 
+(which means the aggregate of all the users of your integration), you'll be fin)
+
+So it is your responsibility to use the action in a manner as not to go beyond this limitations.
+My experience is that is ok to take a dozen of photo-notes in an hour. But still occasionally I 
+have an eye on the statistics Flickr provides for my API key.
+
+To conclude the example, the result is a .enex file (path shown on the last line of console output)
+There is one additional step required: to import the .enex file into Evernote, what can be done by double-clicking
+onto it on Windows.
+
+So I provided the generated photo-note in the (yet to be written) test suite of update-photonotes,
+see tests/data and file 'rod_waddington 49889542513 .enex'.
+
+Note that I added whitespaces around the photo id by intent - so it is easier to pick it in the Windows explorer
+and copy it to the clipboard, as you may search for the imported note in Evernote, best using this id.
