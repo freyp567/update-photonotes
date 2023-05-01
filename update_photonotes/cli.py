@@ -77,9 +77,12 @@ def updater(quiet:bool, verbose:bool) -> None:
 
 @updater.command(
     help="""Update Photonotes db from Evernote notes in backup db
+    
+    e.g. 
+    update-db --notebook=Bilder_FlickrImages --limit=1000000 --skip=1000
+    
     """
 )
-## update-db --notebook=Bilder_FlickrImages --limit=1000000 --warn-http --skip=2637 --debug
 @click.option(
     '--notebook',
     required=True,
@@ -115,10 +118,47 @@ def update_db(
     options.limit = limit
     options.skip = skip
     options.debug = os.getenv("DEBUG") == '1'
+    options.warn_http = False  # True to output warning if http (non https) links found
 
     cli_app.update_db(
         options,
         notebook,
+    )
+
+
+
+@updater.command(
+    help="""allow authenticated access
+    the credentials will be saved to a session file and can be used
+    transparently by the other actions
+    
+    e.g. 
+    authenticate --permissions=read
+    
+    note that this is an *iteractive* process, it will require to open the web url output
+    in an external webbrowser, and the user needs to confirm to grant the desired access
+    to the update-photonotes application, then copying the created verification code back
+    to proceed. 
+    
+    A session file will be written that afterwards can be detected and used by other actions.
+    
+    """
+)
+@click.option(
+    '--permissions',
+    required=True,
+)
+
+def authenticate(
+        permissions: str,
+) -> None:
+    """ Create photonote either from url passed or the one passed on clipboard """
+    options = SimpleNamespace()
+    options.debug = os.getenv("DEBUG") == '1'
+
+    cli_app.authenticate(
+        options,
+        permissions,
     )
 
 

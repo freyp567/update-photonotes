@@ -10,10 +10,11 @@ from typing import Optional
 
 import pyclip
 
-from update_photonotes.database import PhotoNotesDB
-from update_photonotes.updater import NotesUpdater
-from update_photonotes.note_creator import NoteCreator
-from update_photonotes.blog_creator import BlogCreator
+from .database import PhotoNotesDB
+from .authenticate import authenticate_session
+from .updater import NotesUpdater
+from .note_creator import NoteCreator
+from .blog_creator import BlogCreator
 
 import logging
 logger = logging.getLogger(__name__)
@@ -38,6 +39,14 @@ def text_from_clipboard():
     cb_data = pyclip.paste()
     text = cb_data.decode('latin-1')  # TODO default encoding?
     return text
+
+
+def authenticate(
+        options: SimpleNamespace,
+        permissions: str,
+) -> None:
+    """ authenticate user for requested permissions """
+    authenticate_session(options, permissions)
 
 
 def update_db(
