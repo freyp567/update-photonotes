@@ -15,6 +15,10 @@ Here is a concrete example of one of my photo-notes. It is on an image that can 
 ... and is one of the excellent pictures that are made available with a permissive license (Creative Commons)
 so I picked this one for an example as I may share and adapt the image under the CC BY-SA 2.0 license set.
 
+For this I will give a more detailled description on what update-photonotes action create-note can do - this will
+also be type of notes that can be handled and (in future) updated by action update-db. Explanation of both follows. 
+For the example see later on in section 
+[What a photo-note looks like](https://github.com/freyp567/update-photonotes#what-a-photo-note-looks-like).
 
 
 ## Actions
