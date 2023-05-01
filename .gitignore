@@ -161,3 +161,4 @@ cython_debug/
 
 # miscellaneous data
 /temp/
+/run_app.cmd

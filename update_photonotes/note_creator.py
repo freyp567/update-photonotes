@@ -488,21 +488,19 @@ class NoteCreator:
 
         # archive image (size Large or Medium)
         archive_name = "(not archived)"
-        archive_path = Path(os.environ.get("PHOTO_ARCHIVE", self.base_path))
+        archive_path = Path(os.environ["PHOTO_ARCHIVE"]) if os.environ.get("PHOTO_ARCHIVE") else None
         img_key_item, s_size = self.pick_size(sizes, ("Large", "Medium"))
         if s_size:
-            archive_path = Path(os.environ.get("PHOTO_ARCHIVE", self.base_path))
-            if archive_path.is_dir():
+            key_parts = str(img_key_item).split('_')
+            archive_name = f"{user.id} {photo.id} {'_'.join(key_parts[1:])}"
+            if blog_id != user.id:
+                archive_name = f"{blog_id} {archive_name}"
+            logger.info(f"image is {img_key_item} size={s_size['label']} ...")
+            if archive_path is not None:
                 archive_path = archive_path / datetime.datetime.now().strftime("%Y-%m")
                 archive_path.mkdir(exist_ok=True)
-                key_parts = str(img_key_item).split('_')
-                archive_name = f"{user.id} {photo.id} {'_'.join(key_parts[1:])}"
-                if blog_id != user.id:
-                    archive_name = f"{blog_id} {archive_name}"
                 img_file_a = archive_path / archive_name
                 if not img_file_a.is_file():
-                    # archive image
-                    logger.info(f"picked {img_key_item} size={s_size['label']} ...")
                     photo.save(str(img_file_a), s_size['label'])
             else:
                 archive_path = None
