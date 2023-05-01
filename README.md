@@ -81,7 +81,7 @@ The documentation for poetry is here:
 
 ## Background / Motivation
 
-Since a couple of years I already collect notes on excellent and interesting photos I find in Flickr.
+Since a couple of years I already collect notes on excellent and interesting photos (from flickr and beyond).
 The notes are created using Evernote Webclipper, then adapted and enhaced by adding more content
 and information that is essential to find the image again later on ... e.g. some location info,
 if possible the introductory sentence from Wikipedia. And not to forget tagging, where I do not just want to take
