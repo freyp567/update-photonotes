@@ -1,0 +1,69 @@
+	<en-note>
+		<div>${today}</div>
+		<div>
+			<br/>
+		</div>
+		<div>
+images:
+		</div>
+		<ul>
+			<li>   </li>
+		</ul>
+		<div>
+			<br/><br/>
+		</div>
+		<div>more images:
+<br/><span>...</span>
+</div>
+		<div>
+			<br/><br/>
+		</div>
+		<div>${blog_info}</div>
+
+		<hr/>
+		<div>Clip-Quelle:
+<span style="--en-highlight:yellow;background-color: #ffef9e;">${blog_link}</span>
+		</div>
+		<div>
+			<br/>
+		</div>
+		<div>${today}</div>
+		<hr/>
+		<div>
+<b>${real_name} | ${user_name} | ${blog_id} | ${user_location}</b>
+		</div>
+		<en-media style="--en-naturalWidth:${media_width}; --en-naturalHeight:${media_height};"
+        			hash="${filehash}"
+        			type="${mimetype}" />
+		<div>
+			<br/>
+		</div>
+		<div>
+			<a href="${blog_url}">${flickr_url}</a>
+		</div>
+		<hr/>
+		<div>
+${blog_details}
+		</div>
+		<hr/>
+		<ul>
+${blog_props}
+		</ul>
+		<hr/>
+		<div>
+			<span style="color:rgb(0, 0, 0);">Albums:</span>
+		</div>
+${albums_list}
+		<hr/>
+		<div>
+			<span style="color:rgb(0, 0, 0);">Galleries:</span>
+		</div>
+${gallery_list}
+		<div>
+			<br/>
+		</div>
+		<div style="text-align:start;">
+			<span style="color:rgb(0, 0, 0);">${timestamp}</span>
+		</div>
+		<div>.</div>
+	</en-note>

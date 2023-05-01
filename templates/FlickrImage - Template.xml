@@ -1,0 +1,92 @@
+	<en-note>
+		<div>${today}</div>
+		<div>
+			<br/>
+		</div>
+		<div>${user_info}</div>
+		<div><a href="${profile_url}">${profile_url}</a></div>
+		<div>${blog_info}<br/></div>
+		<div>
+			<br/>
+		</div>
+		<hr/>
+		<div>${today}</div>
+		<div>
+			<br/>
+		</div>
+		<div>see:  <span style="--en-highlight:yellow;background-color: #ffef9e;">${archive_name}</span> ${archive_info}
+		</div>
+		<div>
+			<br/>
+		</div>
+		<en-media style="--en-naturalWidth:${media_width}; --en-naturalHeight:${media_height};"
+        			hash="${filehash}"
+        			type="${mimetype}" />
+		<div>
+			<br/>
+		</div>
+		<div>
+			<a href="${photo_url}">${flickr_url}</a>
+		</div>
+		<hr/>
+		<div>
+			<a href="${photo_url}"
+ 				rev="en_rl_none">${blog_id} ${image_id}/</a>
+		</div>
+		<div>
+			<br/>
+		</div>
+		<div>
+			<a href="https://www.flickr.com/photos/${blog_id}/"
+ 				rev="en_rl_none">${user_name}</a>
+		</div>
+		<div style="text-align:start;">
+			<span style="color:rgb(0, 0, 0);">Taken: ${photo_taken}</span>
+		</div>
+		<div>
+			<span style="color:rgb(0, 0, 0);">Uploaded: ${photo_uploaded}</span><br/>
+			<span style="color:rgb(0, 0, 0);">Updated: ${lastupdate}</span>
+		</div>
+		<div>
+			<span style="color:rgb(0, 0, 0);">${license_text}</span>
+		</div>
+		<div>
+			<br/>
+		</div>
+		<div style="text-align:start;">
+			${location_text}
+		</div>
+		<h2 style="text-align:start;">
+			<span style="color:rgb(0, 0, 0);">${flickr_title}</span>
+		</h2>
+		<div>
+			<span style="color:rgb(0, 0, 0);">${description}</span>
+		</div>
+		<hr/>
+		<div style="text-align:start;">
+			<span style="color:rgb(0, 0, 0);">(WikipediaInfo)</span>
+		</div>
+		<hr/>
+		<h5>
+			<span style="color:rgb(0, 0, 0);">This photo is in ${albums_count} albums</span>
+		</h5>
+		${albums_info}
+		<br/>
+		<hr/>
+		<h5>
+			<span style="color:rgb(0, 0, 0);">This photo is in ${groups_count} galleries</span>
+		</h5>
+		${groups_info}
+		<hr/>
+		<div>
+			<span style="color:rgb(0, 0, 0);">Tags:</span>
+		</div>
+		${tags_info}
+		<div>
+			<br/>
+		</div>
+		<div style="text-align:start;">
+			<span style="color:rgb(0, 0, 0);">${timestamp}</span>
+		</div>
+		<div>.</div>
+	</en-note>

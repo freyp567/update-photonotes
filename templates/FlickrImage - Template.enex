@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export4.dtd">
+<en-export export-date="${note_updated}" application="Evernote" version="10.55.2">
+  <note>
+    <title>${note_title}</title>
+    <created>${note_created}</created>
+    <updated>${note_updated}</updated>
+    ${note_tags}
+    <note-attributes>
+      <source>web.clip7</source>
+      <source-url>${photo_url}</source-url>
+      <source-application>update_personal_photonotes</source-application>
+    </note-attributes>
+    <content>
+      <![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export4.dtd">
+${content}
+      ]]>
+    </content>
+    <resource>
+      <data encoding="base64">
+${resource_data}
+      </data>
+      <mime>${mimetype}</mime>
+      <width>${preview_width}</width>
+      <height>${preview_height}</height>
+      <resource-attributes>
+        <file-name>${preview_fn}</file-name>
+      </resource-attributes>
+    </resource>
+  </note>
+</en-export>
