@@ -133,7 +133,6 @@ This will produce the console output similar to that one:
 2023-05-01 15:38:06,550 | [WARNING] | 9748 | lookup image 49889542513 in photostream
 2023-05-01 15:38:10,187 | [INFO] | 9748 | image found for 49889542513 at pos=2257
 2023-05-01 15:38:10,187 | [INFO] | 9748 | found photo-note / image for rod_waddington|49889542513
-2023-05-01 15:38:12,594 | [INFO] | 9748 | archiving 49889542513_5cfc6bb069_b.jpg size=Large ...
 2023-05-01 15:38:13,037 | [INFO] | 9748 | api cache stats:
 cache hits / misses:
   _all: 3 / 14
@@ -203,3 +202,22 @@ the otherway round, copy information from the old note to the new one, updating 
 The note given as sample looks as follows:
 
 TODO continue
+
+
+## Searching
+
+Tags are key for finding photo-notes. 
+Choose them by design, with the question how and what you want to search in mind
+and this is nothing that can be (easily) automated. Maybe KI will help in future, but it still is a way to go ...
+and the KI does not know what and how I want to search
+
+So back to the sample, I remember months (or years) later that I saw an interesting photo from an african bird.
+I my search in evernote for it using e.g.
+
+tag:image tag:bird tag:Africa
+
+For given search term, my Evernote (with over 50.000 notes) returns 8 notes I can look through - 
+and can find the photo I had in mind again.
+
+So my tip is to put the effort into the tagging of the photo-notes, and also enrich them e.g. by 
+adding content from Wikipedia, at least the sections that are helpful for searching. 
