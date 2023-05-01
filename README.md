@@ -186,7 +186,7 @@ Note that I added whitespaces around the photo id by intent - so it is easier to
 and copy it to the clipboard, as you may search for the imported note in Evernote, best using this id.
 
 
-## How a photo-noe may look like
+## What a photo-note looks like
 
 Note that the create-note action does only generate a basic note, that serves as starting point for qualifing it
 by adding contents, tags and - indispensable for finding the image later on again - tags.
@@ -200,8 +200,39 @@ by copying information generated in the newly imported note to the old note (in 
 the otherway round, copy information from the old note to the new one, updating links and moving the old one to the bin.
 
 The note given as sample looks as follows:
+![photo-note_1.jpg](doc%2Fphoto-note_1.jpg)
 
-TODO continue
+Some notes before scrolling further down:
+I try to combine similar images onto one photo-note.
+This helps to keep the number of notes small, 
+and still have the chance to find the image again because 
+it can be found from the main or base image of the note.
+
+So lets scroll further down ...
+![photo-note_2.jpg](doc%2Fphoto-note_2.jpg)
+
+I dare to admit, see the topmost comment: I used this image as background image
+for Teams for a while - the image is under Creative Commons License, 
+what should explicitly allow that.
+
+And the photo-note has an image that is used as thumbnail in the 
+list view of evernote. Also helpful to find it again.
+
+Then some information on photo owner and license ...
+we scroll down to the end and see:
+
+![photo-note_3.jpg](doc%2Fphoto-note_3.jpg)
+
+Here you wee the information copied from Wikipedia. 
+Main reason also to assist fulltext search. And as my native language is german,
+also some info in German, as the animal names tend to be quite different.
+Still I prefer english, especially for landscape photos and location names
+as it makes search easier so I have to search primarily for english names, only.
+
+I hope that this illustrates the concept of a photo-note 
+that is what the create-note action should help to create.
+It does only create a basic version, but the remaining is 
+anyway hard to automate and has to be completed manually.
 
 
 ## Searching
@@ -214,7 +245,7 @@ and the KI does not know what and how I want to search
 So back to the sample, I remember months (or years) later that I saw an interesting photo from an african bird.
 I my search in evernote for it using e.g.
 
-tag:image tag:bird tag:Africa
+``tag:image tag:bird tag:Africa``
 
 For given search term, my Evernote (with over 50.000 notes) returns 8 notes I can look through - 
 and can find the photo I had in mind again.
