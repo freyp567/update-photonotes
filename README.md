@@ -172,7 +172,7 @@ relying on the Flickr API. To help prevent this, we limit the access to the API 
 If your application stays under 3600 queries per hour across the whole key 
 (which means the aggregate of all the users of your integration), you'll be fin)
 
-So it is your responsibility to use the action in a manner as not to go beyond this limitations.
+So it is your responsibility to use the action in a manner as not to go beyond this limits.
 My experience is that is ok to take a dozen of photo-notes in an hour. But still occasionally I 
 have an eye on the statistics Flickr provides for my API key.
 
@@ -185,3 +185,21 @@ see tests/data and file 'rod_waddington 49889542513 .enex'.
 
 Note that I added whitespaces around the photo id by intent - so it is easier to pick it in the Windows explorer
 and copy it to the clipboard, as you may search for the imported note in Evernote, best using this id.
+
+
+## How a photo-noe may look like
+
+Note that the create-note action does only generate a basic note, that serves as starting point for qualifing it
+by adding contents, tags and - indispensable for finding the image later on again - tags.
+
+As I do note-taking with Evernote and Flickr already since a couple of years, there are some routines and
+ways to enhance the notes intellectually that I did establish and improve during this time. I know that yours may
+be different, but I am sure everyone that does large scale note-taking does it differently from how I do it.
+
+Nethertheless here a sample of the note generated above, or rather the orginal note than I then do update 
+by copying information generated in the newly imported note to the old note (in case it is a blot note) or
+the otherway round, copy information from the old note to the new one, updating links and moving the old one to the bin.
+
+The note given as sample looks as follows:
+
+TODO continue
