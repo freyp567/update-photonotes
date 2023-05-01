@@ -36,6 +36,8 @@ from . import cli_app
 setup_logging()
 logger = logging.getLogger('updater')
 
+# limit number of images that are walked to to avoid exceeding limit of 3600 api calls per hour
+MAX_PHOtO_POS = 5000
 
 @click.group(cls=NaturalOrderGroup)
 @optgroup.group("Verbosity", cls=MutuallyExclusiveOptionGroup)  # type: ignore
@@ -137,7 +139,7 @@ def update_db(
 @click.option(
     '--max-pos',
     type=int,
-    default=5000,
+    default=MAX_PHOtO_POS,
     help="for image lookup, limit number of flickr images to scan before giving up"
 )
 def create_note(

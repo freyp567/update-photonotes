@@ -34,9 +34,6 @@ import fake_useragent
 import logging
 logger = logging.getLogger('create_note')
 
-# limit number of images that are walked to to avoid exceeding limit of 3600 api calls per hour
-MAX_PHOtO_POS = 10000
-
 # number of images per page - 500 is maximum allowed
 # use maximum for flickr_api.Photo.search to reduce number of API calls for larger photo streams
 IMAGES_PER_PAGE = 500
@@ -505,7 +502,7 @@ class NoteCreator:
                 img_file_a = archive_path / archive_name
                 if not img_file_a.is_file():
                     # archive image
-                    logger.info(f"archiving {img_key_item} size={s_size['label']} ...")
+                    logger.info(f"picked {img_key_item} size={s_size['label']} ...")
                     photo.save(str(img_file_a), s_size['label'])
             else:
                 archive_path = None
