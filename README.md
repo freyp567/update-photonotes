@@ -219,5 +219,12 @@ tag:image tag:bird tag:Africa
 For given search term, my Evernote (with over 50.000 notes) returns 8 notes I can look through - 
 and can find the photo I had in mind again.
 
+Fortunately I am no ornithologist but my focus is more on landscape photography, but in case I were
+(or wildlife photography focussed) I would have to tag my photo-notes differently or more specifically.
+
 So my tip is to put the effort into the tagging of the photo-notes, and also enrich them e.g. by 
 adding content from Wikipedia, at least the sections that are helpful for searching. 
+
+Adding the first paragraph from the beginning, and the categories from the end of a wikipedia article
+that describes a photo location (or nearby city, village or what else) helps to restrict searches ...
+and also to find similar images more easily.
