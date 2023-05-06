@@ -20,6 +20,10 @@ class FlickrDate(object):
         else:
             return self._value.isoformat()
 
+    def __repr__(self):
+        value = str(self)
+        return f"Flickrdate({value})"
+
     def __bool__(self):
         return self._value is not None
 
@@ -39,8 +43,8 @@ class FlickrDate(object):
         return FlickrDate(now.isoformat())
 
 
-class FlickrBlog(object):
-    """ represents a Flickr blog entry """
+class FlickrPhotoBlog(object):
+    """ represents a Flickr photo blog entry """
 
     def __init__(self, blog_id: str, guid_note: str):
         self.blog_id = blog_id
@@ -53,8 +57,8 @@ class FlickrBlog(object):
         self.verified = FlickrDate(None)
 
 
-class FlickrImage(object):
-    """ represents a Flickr image entry """
+class FlickrPhotoNote(object):
+    """ represents a Photo-note (Note on flickr image) """
 
     def __init__(self, image_key: str, guid_note: str):
         self.image_key = image_key
@@ -87,3 +91,6 @@ class FlickrImage(object):
             if value not in cleanups:
                 cleanups.add(value)
         self.need_cleanup = '|'.join(cleanups)
+
+    def clear_cleanup(self):
+        self.need_cleanup = ''

@@ -12,12 +12,16 @@ from evernote_backup.note_formatter import NoteFormatter
 from evernote_backup.note_exporter_util import SafePath
 from evernote.edam.type.ttypes import Note
 
+
 from .conversion import get_note_content
-from .flickr_types import FlickrImage, FlickrDate
-from .database import PhotoNotesDB
+from .flickr_types import FlickrPhotoNote, FlickrDate
+from .database import PhotoNotesDB, lookup_note
+from .exceptions import NoteNotFound,  PhotoNoteNotFound
+from .note_utils import Note2
 
 import logging
-LOGGER = logging.getLogger('updater.update')
+logger = logging.getLogger('app.updater')
+
 
 FLICKR_URL = "https://www.flickr.com/"
 FLICKR_PHOTO_URL = "https://www.flickr.com/photos/"
@@ -46,18 +50,18 @@ class NotesUpdater:
             # calculating total number of notes costs some seconds, so show only if not debugging
             count_notes = notes.get_notes_count()
             count_trash = notes.get_notes_count(is_active=False)
-            LOGGER.info(f"have {count_notes} notes in store ({count_trash} inactive)")
+            logger.info(f"have {count_notes} notes in store ({count_trash} inactive)")
 
         self.pos = 0
         processed = []
         notebooks = tuple(self.notes_db.store.notebooks.iter_notebooks())
         for nb in notebooks:
             if notebook not in("*", "all") and nb.name != notebook:
-                LOGGER.debug(f"skip notebook: {nb.name}")
+                logger.debug(f"skip notebook: {nb.name}")
                 continue
             processed.append(nb.name)
             self._update_notes(nb, export_enex)
-        LOGGER.info(f"updated notebook: {processed} ")
+        logger.info(f"updated notebook: {processed} ")
         return
 
     def _need_update_blog(self, blog_note) -> bool:
@@ -74,14 +78,14 @@ class NotesUpdater:
                     # ..., 'rev': 'en_rl_none', 'target': '_blank'}
                     self._handle_image_link(blog_note, href)
                 else:
-                    LOGGER.debug(f"ignored href={href!r}")
+                    logger.debug(f"ignored href={href!r}")
 
             # 'www.flickr.com/people/'
             if 'www.flickr.com/photos' not in content_text:
                 return False
             return True
         except Exception as err:
-            LOGGER.exception('update check failed')
+            logger.exception('update check failed')
         return False
 
     def _extract_see_v1(self, xml, note: Note):
@@ -96,11 +100,11 @@ class NotesUpdater:
             return None, None
         if len(divs) > 1:
             # a photo note may contain a stack of related / similar images
-            LOGGER.debug(f"photo note with stacked images ({len(divs)-1}), last: {etree.tostring(divs[-1])}")
+            logger.debug(f"photo note with stacked images ({len(divs)-1}), last: {etree.tostring(divs[-1])}")
             # we assume last 'see:' is the one related to the main image
 
         ## DODO accumulate div_info items found, but show only if there is a mismatch - and drop debugging prints
-        print(f'\n\n[#{self.pos}] - {note.title!r}')  ##debugging
+        print(f'\n\n[#{self.pos}] - {note!r}')  ##debugging
         highlighted = []
         found = None
         for div in divs:
@@ -117,7 +121,7 @@ class NotesUpdater:
                     highlighted.append((div, found))
                 else:
                     # highlight on whitespace - hard to see but it happes; just ignore
-                    LOGGER.warning(f"ignore highlight on whitespace, see {div_info}")
+                    logger.warning(f"ignore highlight on whitespace, see {div_info}")
                     found = None
 
             else:
@@ -126,11 +130,11 @@ class NotesUpdater:
                 if not found:
                     # TODO examine
                     found = div.text or '(see-info missing)'
-                    LOGGER.warning(f"{self.pos}| see-info found: {found}")
+                    logger.warning(f"{self.pos}| see-info found: {found}")
                     # TODO examine
                 else:
                     found = ' '.join([f.strip() for f in found])
-                    LOGGER.debug(f"{self.pos}| found see-info for stacked image: {found}")
+                    logger.debug(f"{self.pos}| found see-info for stacked image: {found}")
 
         if found is None:
             return None, None
@@ -142,14 +146,14 @@ class NotesUpdater:
         if found in ('(not archived)', '-NA-'):
             return None, None
         if not highlighted:
-            LOGGER.warning(f'{self.pos}| missing highlighted see-info for main image of "{note.title}"')
+            logger.warning(f'{self.pos}| missing highlighted see-info for main image of {note}')
             cleanup_required = "see-info not highlighted"
         elif len(highlighted) > 1:
             # unexpected to have more than one, need to verify manually
-            LOGGER.warning(f'{self.pos}| failed to detect highlighted see-nfo for {found} - "{note.title}"')
+            logger.warning(f'{self.pos}| failed to detect highlighted see-nfo for {found} - {note}')
             cleanup_required = "see-info not found"
         elif highlighted[-1][1] != found:
-            LOGGER.warning(f'{self.pos}| mismatch with highlighted see-info for "{found}" in "{note.title}"')
+            logger.warning(f'{self.pos}| mismatch with highlighted see-info for "{found}" in {note}')
             cleanup_required = "see-info mismatch"
         else:
             pass
@@ -181,12 +185,12 @@ class NotesUpdater:
             if is_highlight:
                 if len(is_highlight) > 1:
                     self.add_warning("cleanup required", "multiple highlights in see-info")
-                    LOGGER.warning(f"found multiple highlight sections in see-info div: {node_info}")
+                    logger.warning(f"found multiple highlight sections in see-info div: {node_info}")
                 value = ' '.join([f.strip() for f in is_highlight[0].xpath(".//text()")])
                 if value:
                     value = value.strip()
                 if not value:
-                    LOGGER.warning(f"ignore highlight with only whitespace in {node_info}")
+                    logger.warning(f"ignore highlight with only whitespace in {node_info}")
                     return ""
             else:
                 # stacked see-info, prepend plus to indicate
@@ -221,18 +225,65 @@ class NotesUpdater:
                 return see_highlight[0]
 
         if see_found and see_found[-1] in ('+(not archived)', '+-NA-'):
-            LOGGER.debug(f'{self.pos}| found see-info, is {see_found[-1][1:]!r} for "{note.title}"')
+            logger.debug(f'{self.pos}| found see-info, is {see_found[-1][1:]!r} for {note}')
             return None
 
         all_sees = "\n   ".join(see_found)
-        LOGGER.warning(f'''{self.pos}| missing highlighted see-info in "{note.title}"
+        logger.warning(f'''{self.pos}| missing highlighted see-info in {note}
 found see:
    {all_sees}
 ''')
         self.add_warning("cleanup required", "see-info not highlighted")
         return None
 
-    def _handle_image_link(self, photo_note, href):
+    def _fetch_photonote(self, note: Note2, image_key: str) -> tuple:
+        """ fetch photo-note (if one exists), handle updates and moves in EN """
+        def log_note(note: Note2):
+            updated = datetime.datetime.fromtimestamp(note.date_updated)
+            return f"{note} updated={updated}"
+
+        other_note = None
+
+        # lookup photo-note for given image_key
+        try:
+            photo_note = self.notes_db.flickrimages.lookup_by_key(image_key)
+        except PhotoNoteNotFound:
+            photo_note = None
+
+        if photo_note is None:
+            # not found, new photo-note
+            return None, None
+
+        # detect moved and duplicated notes
+        if note.en_note.guid != photo_note.guid_note:
+            # ensure uniqueness per image, but handle replacement of old note when gone
+            try:
+                other_note = Note2(lookup_note(self.notes_db.store, photo_note.guid_note))
+            except NoteNotFound:
+                logger.info(f"detected old note is replaced by new one for image {image_key}")
+            else:
+                if other_note.en_note.deleted is None:
+                    # have existing note
+                    logger.error(f"found different note describing same image {image_key}\n"
+                                 f"have photo-note:   {log_note(other_note)}\n"
+                                 f"new note rejected: {log_note(note)}\n"
+                                 )
+                    # nsure that no new note is created by caller by returning other_note
+                    photo_note = None
+
+                else:
+                    logger.info(f"replacing deleted note by {note}\n")
+                    other_note = None  # ignore note, is in bin
+        elif note.en_note.deleted is not None:
+            logger.error(f"cannot update note marked for deletion: {note}")
+            raise ValueError("attemt to update deleted note")
+        else:
+            logger.debug(f"existing note: {note}")
+
+        return photo_note, other_note
+
+    def _handle_image_link(self, note: Note, href: str) -> dict:
+        """ have image link (potentially) identifying photo-note; get details on it """
         # 'https://www.flickr.com/photos/27297062@N02/51089206529/in/pool-inexplore/'
         found = {}
         assert href.startswith(FLICKR_PHOTO_URL)
@@ -240,7 +291,7 @@ found see:
         parts = href_img.split('/')
         if len(parts) < 2:
             # e.g. http://www.flickr.com/photos/shannonroseoshea
-            LOGGER.debug(f"ignore url to blog page: {href}")
+            logger.debug(f"ignore url to blog page: {href}")
             return None
         found['image_key'] = f"{parts[0]}|{parts[1]}"
         found['blog_id'] = parts[0]
@@ -249,11 +300,9 @@ found see:
             # ignore photostream url
             return None
 
-        # lookup photo note for image_key
-        try:
-            found['photo_note'] = self.notes_db.flickrimages.lookup_image_by_key(found['image_key'])
-        except ValueError:
-            found['photo_note'] = None
+        found_pn = self._fetch_photonote(note, found['image_key'])
+        # expect tuple (this photonote, other photonote)
+        found['photo_note'], found['other_photonote'] = found_pn
 
         # lookup blog note for found['blog_id']
         try:
@@ -268,7 +317,6 @@ found see:
             elif parts[-1] == '#':
                 parts = parts[:-1]
 
-
         if len(parts) > 2:
             if parts[2] == 'in':
                 context = parts[3]
@@ -280,7 +328,7 @@ found see:
                 found['context'] = context
             elif parts[2] == 'undefined':
                 # happens because WebClipper had a bug (in past)
-                LOGGER.debug("ignore undefined in image link")
+                logger.debug("ignore undefined in image link")
                 context = None
             elif not parts[2]:
                 # empty part, caused by trailing slash
@@ -288,7 +336,7 @@ found see:
             else:
                 # e.g. '190022557@N04/51159019066/sizes/l/'
                 # '190022557@N04/with/51159019066/'
-                LOGGER.info(f"failed to detect context for href={href_img}")
+                logger.info(f"failed to detect context for href={href_img}")
                 context = None
         else:
             context = None
@@ -302,7 +350,7 @@ found see:
             text_warn = text_warn[:40] + '...'
         if href:
             if not href.startswith('http'):
-                LOGGER.warning(f"detected href not starting with http or https: {href}")
+                logger.warning(f"detected href not starting with http or https: {href}")
         else:
             href = ''
         info.append((href, text_warn))
@@ -328,17 +376,17 @@ found see:
                     break
 
             lines.append('')  # for better readability
-            LOGGER.warning(f'{self.pos}| {warning} in "{note.title}"\n  + %s' % "\n  + ".join(lines))
+            logger.warning(f'{self.pos}| {warning} in {note}\n  + %s' % "\n  + ".join(lines))
 
             # signal cleanup required - using set to avoid duplicates
             need_cleanup.add(warning)
         return need_cleanup
 
-    def _analyze_photo_note(self, note: Note) -> dict:
+    def _analyze_photo_note(self, note: Note2) -> dict:
         """ verify content of photo note """
 
         result = {'photo_note': None}
-        content = get_note_content(note.content)
+        content = get_note_content(note.en_note.content)
         try:
             # extract see:
             xml = etree.fromstring(content)
@@ -364,17 +412,17 @@ found see:
                 if '/sets/' in href:
                     # e.g. 'https://www.flickr.com/photos/(blog_id))/sets/(set_id))'
                     if href.split('/')[5] != 'sets':
-                        LOGGER.warning(f"{self.pos}| ignore non-standard album link {href}")
+                        logger.warning(f"{self.pos}| ignore non-standard album link {href}")
                     continue
                 if '/albums/' in href:
                     # e.g. 'https://www.flickr.com/photos/(blog_id)/albums/(album_id)'
                     if href.split('/')[5] != 'albums':
-                        LOGGER.warning(f"{self.pos}| ignore non-standard album link {href}")
+                        logger.warning(f"{self.pos}| ignore non-standard album link {href}")
                     continue
                 if '/galleries/' in href:
                     # e.g. 'https://www.flickr.com/photos/(blog_id)/galleries/(gallery_id)/'
                     if href.split('/')[5] != 'galleries':
-                        LOGGER.warning(f"{self.pos}| ignore non-standard galleries link {href}")
+                        logger.warning(f"{self.pos}| ignore non-standard galleries link {href}")
                     continue
                 if href.startswith("https://www.flickr.com/photos/"):
                     # 'href': 'https://www.flickr.com/photos/27297062@N02/51089206529/in/pool-inexplore/',
@@ -383,7 +431,7 @@ found see:
                     candidate = self._handle_image_link(note, href)
                     if candidate is None:
                         # ignore - degenerated link, photostream url, ...
-                        LOGGER.debug(f"ignore link href={href!r}")
+                        logger.debug(f"ignore link href={href!r}")
                         continue
                     else:
                         # check if before or after image thumbnail (en-media element)
@@ -407,10 +455,10 @@ found see:
                                 link_info['context'] = context2
                             else:
                                 # e.g. photolist vs datetaken
-                                LOGGER.debug(f"{self.pos}| context differs for {link_info['image_key']}: {context} vs {context2}")
+                                logger.debug(f"{self.pos}| context differs for {link_info['image_key']}: {context} vs {context2}")
                                 link_info['context'] = context2
                         if link_info2 != link_info:
-                            LOGGER.warning("{self.pos}| detected difference in link info:\n{link_info2}\n{link_info]")
+                            logger.warning("{self.pos}| detected difference in link info:\n{link_info2}\n{link_info]")
 
                     links[link_info['image_key']] = link_info
                     if not before_thumbnail:
@@ -468,13 +516,18 @@ found see:
             see_info = result.get('see')
             if link_info:
                 if not see_info:
-                    LOGGER.debug(f'missing see-info for photo note "{note.title}"')
+                    logger.debug(f'missing see-info for photo note {note}')
                 elif link_info['photo_id'] not in see_info:
-                    LOGGER.warning(f'{self.pos}| see-info not related to photo id {link_info["photo_id"]}: "{see_info}"')
+                    logger.warning(f'{self.pos}| see-info not related to photo id {link_info["photo_id"]}: "{see_info}"')
                     # need to check correspondence manually
                     need_cleanup.add("see-info mismatch with image link")
 
-                if not link_info.get('photo_note'):
+                if link_info.get('other_photonote'):
+                    # already have a photo-note, but a different one
+                    logger.debug(f"already have photo-note - but different one")  # already logged
+                    # avoid that wrong / other note gets updated
+                    photo_note = None
+                elif not link_info.get('photo_note'):
                     # create photo note from link_info
                     photo_note = self._create_photo_note(link_info, result, note)
                 else:
@@ -482,51 +535,55 @@ found see:
                     photo_note = link_info['photo_note']
                 result['photo_note'] = photo_note
 
-                if need_cleanup and photo_note is not None:
-                    # store detailed info (string) on required cleanup
-                    photo_note.add_cleanup(need_cleanup)
+                if photo_note is not None:
+                    if need_cleanup:
+                        # store detailed info (string) on required cleanup
+                        photo_note.add_cleanup(need_cleanup)
+                    else:
+                        photo_note.clear_cleanup()
 
             else:
-                LOGGER.warning(f'no link info found for note "{note.title}"')
+                logger.warning(f'no link info found for note {note}')
                 result['photo_note'] = None
 
             return result
         except Exception as err:
-            LOGGER.exception('update check failed')
+            logger.exception('update check failed')
             result['error'] = err
         return result
 
     def _update_notes(self, notebook, export_enex: bool) -> None:
         parent_dir = [notebook.stack] if notebook.stack else []
         if self.options.skip:
-            LOGGER.info(f"updating notebook {notebook.name} (skip {self.options.skip})...")
+            logger.info(f"updating notebook {notebook.name} (skip {self.options.skip})...")
         else:
-            LOGGER.info(f"updating notebook {notebook.name} ...")
+            logger.info(f"updating notebook {notebook.name} ...")
         store = self.notes_db.store
         notes_source = store.notes.iter_notes(notebook.guid)
 
         for note in notes_source:
             assert isinstance(note, Note), "expect note instance"
             self.pos += 1
+            note2 = Note2(note)
 
             if not note.tagNames:
-                LOGGER.warning(f'ignore note {self.pos} without tags: "{note.title}"')
+                logger.warning(f'ignore note {self.pos} without tags: {note2}')
                 continue  # ignore notes without tags
 
             if 'inaccessible' in note.tagNames:  ##TODO make configurable
-                LOGGER.debug(f'skip inaccessible note: "{note.title}"')
+                logger.debug(f'skip inaccessible note: {note2}')
                 continue
 
             if self.options.tag_name and self.options.tag_name not in note.tagNames:
-                LOGGER.info(f"skip note {self.pos} not having desired tag name")
+                logger.info(f"skip note {self.pos} not having desired tag name")
                 continue
 
             # classify note depending on tags
             if TAG_NAME_PHOTONOTE in note.tagNames:
-                # LOGGER.debug(f'accept note {self.pos} tagged as image: "{note.title}"')  # ATTN bloat - commented out
+                # LOGGER.debug(f'accept note {self.pos} tagged as image: {note2}')  # ATTN bloat - commented out
                 handler = self._update_flickr_image
             elif TAG_NAME_BLOGNOTE in note.tagNames:
-                LOGGER.debug(f'accept note {self.pos} tagged as blog: "{note.title}"')
+                logger.debug(f'accept note {self.pos} tagged as blog: {note2}')
                 handler = self._update_flickr_blog
             else:
                 handler = None
@@ -535,11 +592,19 @@ found see:
                 if self.options.skip > 0:
                     # for testing skip first N notes
                     if not self.options.debug:
-                        LOGGER.warning(f"skipping note {self.pos}: {note.title}")
+                        logger.warning(f"skipping note {self.pos}: {note.title}")
                     self.options.skip -= 1
                     continue
 
-                handler(note, export_enex)
+                if note.deleted is not None:
+                    logger.debug(f"ignore deleted note {note2}")
+                    continue
+
+                # for debugging, it is somethimes useful to be able to pick a photo-note by title
+                if self.options.note_title and note.title != self.options.note_title:
+                    continue
+                handler(note2, export_enex)
+
 
         return
 
@@ -552,17 +617,17 @@ found see:
             self.count += 1
             # TODO implement proper throttling, ensuring no more than (.limit) notes per (interval)
             if self.count > self.limit:
-                LOGGER.warning(f"reached notes limit")
+                logger.warning(f"reached notes limit")
                 return
 
             if export_enex:
                 # export as enex for reimport to Evernote
                 # TODO evaluate/decide:
                 #    can we update existing note from .enex or should we rather use the Evernote API?
-                LOGGER.debug(f"Exporting note {note.title!r} updated={note.updated}")
+                logger.debug(f"Exporting note {note.title!r} updated={note.updated}")
                 _write_export_file(note_path, note)
 
-    def _update_flickr_image(self, note: Note, export_enex: bool) -> None:
+    def _update_flickr_image(self, note: Note2, export_enex: bool) -> None:
         """ examine and update photo note """
         self.warnings = {}  # drop warnings from previous notes
 
@@ -573,15 +638,13 @@ found see:
         if photo_note:
             # already have entry on photo_note in db
             entry_verified = photo_note.date_verified.value
-            note_updated = datetime.datetime.fromtimestamp(note.updated/1000.0).date()
-            if note.guid != photo_note.guid_note:
-                LOGGER.warning(f'detected different / additional photo note {photo_note.image_key}\n  in note: "{note.title}"')
-                TODO = 1  # TODO examine cause / reason
-                #
-                #
-                #
-                # for now avoid to create an additional photo note entry
-                need_update = False
+            note_updated = note.date_updated()
+            if note.en_note.guid != photo_note.guid_note:
+                logger.debug(f'replacing  photo note {photo_note.image_key} by note: {note}')
+                # happens if new note is created (for same image),
+                # to replace an old note, then deleting the old note (moving to Bin)
+                photo_note.guid_note = note.en_note.guid
+                need_update = True
             elif not entry_verified or note_updated > entry_verified:
                 # note got updated since last verification
                 need_update = True
@@ -589,22 +652,22 @@ found see:
                 # photo note entry from db, check when it got last updated (or created)
                 age = photo_note.entry_updated.value - datetime.date.today()
                 if age < datetime.timedelta(days=NO_UPDATE_AGE):
-                    # avoid updating notes that ahve been updated recently
+                    # avoid updating notes that have been updated recently  # TODO verify usecase
                     need_update = False
                 else:
-                    LOGGER.debug(f'photonote last updated {age} days ago: "{note.title}"')
+                    logger.debug(f'photonote last updated {age} days ago: {note}')
         elif photo_info.get('link'):
             # new photo note, always update
             need_update = True
         elif photo_info.get('see'):
             # missing link to flickr photo
-            LOGGER.warning(f'note with see-info but no image link: "{note.title}"')
+            logger.warning(f'note with see-info but no image link: {note}')
             # photo_info['need_cleanup'] = 'missing image link'
             # need_update = XXX - need photo_note for update, but dont have one
             TODO = 1
         else:
             # no photo note or incomplete; cleanup required
-            LOGGER.warning(f'note without link to photo: "{note.title}"')
+            logger.warning(f'note without link to photo: {note}')
             need_update = False
 
         if photo_info.get('need_cleanup'):
@@ -614,7 +677,7 @@ found see:
             return
 
         if photo_info.get('photo_note') is None:
-            LOGGER.warning(f'cannot update, have no photo note for "{note.title}"')
+            logger.warning(f'cannot update, have no photo note for {note}')
             return
 
         self.count += 1
@@ -624,29 +687,31 @@ found see:
         # update note in SQLite db
         self.notes_db.flickrimages.update(photo_info['photo_note'])
 
-        if export_enex:
-            # export as enex for reimport to Evernote
-            # TODO evaluate/decide:
-            #    can we update existing note from .enex or should we rather use the Evernote API?
-            LOGGER.debug(f"Exporting note {note.title!r} updated={note.updated}")
-            note_path = None  #T
-            _write_export_file(note_path, note)
+        # TODO export enex only if note requires update in Evernote
+        # but currently cannot detect / handle / no sync (yet) from Flickr so commented out
+        # if export_enex:
+        #     # export as enex for reimport to Evernote
+        #     # TODO evaluate/decide:
+        #     #    can we update existing note from .enex or should we rather use the Evernote API?
+        #     logger.debug(f"Exporting note {note} updated={note.date_updated()}")
+        #     note_path = None  #T
+        #     _write_export_file(note_path, note)
 
-        # TODO implement proper throttling, ensuring no more than (.limit) notes per (interval)
-        # for time beeing just limit number of updates to a predefined limit
+        # TODO change to use ratelimit to avoid excessive use of Flickr API
+        # for debugging limit number of updates to a predefined limit
         if self.count > self.limit:
-            LOGGER.warning(f"reached notes limit")
+            logger.warning(f"reached notes limit at pos={self.pos}")
             raise RuntimeError("reached notes limit")
         return
 
-    def _create_photo_note(self, link_info: dict, result: dict, note: Note, reference: Optional[dict] = None) -> FlickrImage:
+    def _create_photo_note(self, link_info: dict, result: dict, note: Note, reference: Optional[dict] = None) -> FlickrPhotoNote:
         """ factory method to create photo note from note info and Flickr image link """
-        LOGGER.debug(f'new photo note image key={link_info["image_key"]}: "{note.title}"')
-        pnote = FlickrImage(link_info["image_key"], note.guid)
+        logger.debug(f'new photo note image key={link_info["image_key"]}: {note}')
+        pnote = FlickrPhotoNote(link_info["image_key"], note.guid)
         photo_id = link_info.get('photo_id')
         if photo_id in ('albums', ):
             # happens when a link to an album is embedded in photo description
-            LOGGER.error(f'invalid photo_id={photo_id} for note "{note.title}"')
+            logger.error(f'invalid photo_id={photo_id} for note {note}')
             return None
 
 
@@ -654,27 +719,27 @@ found see:
         if result.get('see'):
             see = result['see']
             if photo_id not in see:
-                LOGGER.warning(f'{self.pos}| missing image id {photo_id} in {see} for "{note.title}"')
+                logger.warning(f'{self.pos}| missing image id {photo_id} in {see} for {note}')
                 # needs manual verification. so set need_cleanup
                 pnote.add_cleanup("missing image_id in see-info")
 
             pnote.see_info = see
             if '|' in see:
-                LOGGER.debug(f"{self.pos}| truncate see-info at slash: {see}")
+                logger.debug(f"{self.pos}| truncate see-info at slash: {see}")
                 see = see.split('|')[0].strip()
             see_parts = see.split('.')
             if len(see_parts) > 1:
                 if see_parts[-1] == 'crdownload':
-                    LOGGER.warning(f"{self.pos}| detected bad see-info: {see}")
+                    logger.warning(f"{self.pos}| detected bad see-info: {see}")
                     pnote.add_cleanup("missing image_id in see-info")
                     see_parts = see_parts[:-1]
                 see_filetype = see_parts[-1].split(' ')[0].strip()
                 if see_filetype in ('png',):
-                    LOGGER.warning(f"{self.pos}| detected see-info referencing non JPEG: {see}")
+                    logger.warning(f"{self.pos}| detected see-info referencing non JPEG: {see}")
                     # candidate for cleanup, should not use .png
                     pnote.add_cleanup(f"undesired image type {see_filetype}")
                 elif see_filetype not in ('jpeg', 'jpg', 'mp4', ):
-                    LOGGER.warning(f"unexpected suffix in see-info: {see}")
+                    logger.warning(f"unexpected suffix in see-info: {see}")
                     pnote.add_cleanup("{self.pos}| unrecognized filetype suffix in see-info")
                 fn_parts = see_parts[-2].split('_')
                 while fn_parts and not fn_parts[-1]:
@@ -719,7 +784,7 @@ def _write_export_file(
     file_path: Path, note: Note
 ) -> None:
     with open(file_path, "w", encoding="utf-8") as f:
-        LOGGER.debug(f"Writing file {file_path}")
+        logger.debug(f"Writing file {file_path}")
 
         f.write(ENEX_HEAD)
 
@@ -729,6 +794,7 @@ def _write_export_file(
             f' application="Evernote" version="10.10.5">'
         )
 
+        ## TODO refactor - usecase?
         assert isinstance(note, Note)
         note_content = NoteFormatter().format_note(note)
         f.write(note_content)

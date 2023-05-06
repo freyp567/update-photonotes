@@ -17,8 +17,8 @@ import hashlib
 import csv
 
 from .database import PhotoNotesDB, lookup_note
-from .flickr_types import FlickrImage
-from .exceptions import FlickrImageNotFound, NoteNotFound
+from .flickr_types import FlickrPhotoNote
+from .exceptions import PhotoNoteNotFound, NoteNotFound
 from . import utils
 from . import flickr_utils
 
@@ -335,7 +335,7 @@ class NoteCreator:
                        user: Person,
                        photo: Photo,
                        enex_path: Path,
-                       photo_note: Optional[FlickrImage],
+                       photo_note: Optional[FlickrPhotoNote],
                        ):
         """ generate content for photo found """
 
@@ -547,20 +547,18 @@ class NoteCreator:
         logger.info(f"created note in {enex_path}")
         return not has_error
 
-    def lookup_photonote(self, blog_id: str, photo_id: str) -> Optional[FlickrImage]:
+    def lookup_photonote(self, blog_id: str, photo_id: str) -> Optional[FlickrPhotoNote]:
         image_key = f"{blog_id}|{photo_id}"
         try:
-            found = self.notes_db.flickrimages.lookup_image_by_key(image_key)
-        except FlickrImageNotFound:
-            logger.debug(f"no photo-note / image found for {image_key}")
+            found = self.notes_db.flickrimages.lookup_by_key(image_key)
+        except PhotoNoteNotFound:
+            logger.debug(f"no photo-note found for image key={image_key}")
             return None
-        if found:
+        else:
             logger.info(f"found photo-note / image for {image_key}")
             return found
-        else:
-            return None
 
-    def lookup_en_note(self, photo_note: FlickrImage) -> Optional[Note]:
+    def lookup_en_note(self, photo_note: FlickrPhotoNote) -> Optional[Note]:
         """ lookup Evernote note in evernote-backup db """
         try:
             note = lookup_note(self.notes_db.store, photo_note.guid_note)

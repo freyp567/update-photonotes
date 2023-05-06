@@ -92,6 +92,10 @@ def updater(quiet:bool, verbose:bool) -> None:
     required=False,
 )
 @click.option(
+    '--note-title',
+    required=False,
+)
+@click.option(
     '--limit',
     default=10000,
     type=click.IntRange(1),
@@ -110,6 +114,7 @@ def update_db(
         limit: int,
         skip: int = 0,
         tag_name: Optional[str] = None,
+        note_title: str = None
 ) -> None:
     """ Create photonote either from url passed or the one passed on clipboard """
     options = SimpleNamespace()
@@ -119,6 +124,7 @@ def update_db(
     options.skip = skip
     options.debug = os.getenv("DEBUG") == '1'
     options.warn_http = False  # True to output warning if http (non https) links found
+    options.note_title = note_title
 
     cli_app.update_db(
         options,
