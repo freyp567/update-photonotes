@@ -327,6 +327,7 @@ found see:
                     lines.append(f'... {len(lines) - 3} more ...')
                     break
 
+            lines.append('')  # for better readability
             LOGGER.warning(f'{self.pos}| {warning} in "{note.title}"\n  + %s' % "\n  + ".join(lines))
 
             # signal cleanup required - using set to avoid duplicates
@@ -672,7 +673,7 @@ found see:
                     LOGGER.warning(f"{self.pos}| detected see-info referencing non JPEG: {see}")
                     # candidate for cleanup, should not use .png
                     pnote.add_cleanup(f"undesired image type {see_filetype}")
-                elif see_filetype not in ('jpeg', 'jpg',):
+                elif see_filetype not in ('jpeg', 'jpg', 'mp4', ):
                     LOGGER.warning(f"unexpected suffix in see-info: {see}")
                     pnote.add_cleanup("{self.pos}| unrecognized filetype suffix in see-info")
                 fn_parts = see_parts[-2].split('_')

@@ -190,6 +190,8 @@ def create_note(
     """ Create photonote either from url passed or the one passed on clipboard """
     options = SimpleNamespace()
     options.max_pos = max_pos
+    # note: using authenticated session influences visibility (e.g. of Albums), so use by default
+    options.use_auth_session = True  # use authentication session if available
     options.xml = False  # do not dump .xml by default - only in case of error
     try:
         cli_app.create_note(
