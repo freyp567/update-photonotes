@@ -11,7 +11,7 @@ from evernote_backup.note_storage import SqliteStorage
 from evernote.edam.type.ttypes import Note
 
 from .flickr_types import FlickrPhotoBlog, FlickrPhotoNote, FlickrDate
-from .exceptions import PhotoNoteNotFound
+from .exceptions import PhotoNoteNotFound, NoteNotFound
 
 import logging
 logger = logging.getLogger('updater.database')
@@ -21,6 +21,7 @@ DB_SCHEMA_PN = """\
 CREATE TABLE IF NOT EXISTS flickr_blog(
     blog_id TEXT PRIMARY KEY NOT NULL,
     guid_note TEXT,  -- guid of photo note, or NULL
+    note_tags, -- note tags; list joined by '|';  note: '||' if no tags
     entry_updated TEXT, -- ISO8601 string (date only); date db record got last updated / verified
     date_verified TEXT, -- ISO8601 date - date blog has been checked on flickr
     image_count INTEGER,  -- number of (public) images
@@ -29,44 +30,39 @@ CREATE TABLE IF NOT EXISTS flickr_blog(
     is_gone INTEGER DEFAULT FALSE  -- blog unavailable / removed (Flickr 410)
 );
 
-# TODO refactor flickr_image, split into two tables
-# one describing photo-notes - images that are described by a note
-# and an other one listing other images (stacked images) attached to a note
-# see field reference
-# makes no sense that way as stacked image is only image key plus info from flickr
-# but missing all evernote related attributes
+CREATE INDEX IF NOT EXISTS idx_blog
+  ON flickr_blog(blog_id);
+
 
 CREATE TABLE IF NOT EXISTS flickr_image(
-    image_key TEXT PRIMARY KEY NOT NULL,  -- combination user_id / photo_id (without secret, size suffix)
-    see_info TEXT,
-    reference TEXT, -- main image (same location/stacked)
-    guid_note TEXT,  -- guid of photo note, or NULL (if stacked/same location image)
+    image_key TEXT NOT NULL,  -- combination user_id / photo_id (without secret, size suffix)
+    guid_note TEXT NOT NULL,  -- guid of photo note, or NULL (if stacked/same location image)
+    is_primary INTEGER, -- (BOOEAN) true if image is primary image for photonote
     note_tags, -- note tags; list joined by '|';  note: '||' if no tags
     blog_id TEXT,  -- link to blog entry, see table flickr_blog
-    need_cleanup TEXT DEFAULT '',  -- hint if photoblog note needs update / cleanup
-    -- e.g. missing photo link, ...
     entry_updated TEXT, -- ISO8601 date; date db record got last updated / verified
-    date_verified TEXT, -- ISO8601 date - date blog has been checked on flickr
+    date_verified TEXT, -- ISO8601 date - date image has been checked on flickr
     photo_id TEXT NOT NULL,  -- id of photo page on flickr
     secret_id TEXT,  -- if known
     size_suffix TEXT,  -- if known
     photo_taken TEXT,  -- ISO8601 date  (value from photo_uploaded if not known)
     photo_uploaded TEXT,  -- ISO8601 date
-    is_gone BOOLEAN DEFAULT FALSE  -- image unavailable / removed (Flickr 404)
+    is_gone BOOLEAN DEFAULT FALSE,  -- image unavailable / removed (Flickr 404)
+    PRIMARY KEY (image_key, guid_note)
 );
 
-CREATE INDEX IF NOT EXISTS idx_blog
-  ON flickr_blog(blog_id);
-
+CREATE INDEX IF NOT EXISTS idx_key
+  ON flickr_image(image_key);
+  
 CREATE INDEX IF NOT EXISTS idx_image_blog
   ON flickr_image(blog_id);
 """
 
 class PhotoNotesDB:
 
-    def __init__(self, dbpath, truncate=False):
+    def __init__(self, dbpath, reset=False):
         self.wrapped_store = SqliteStorage(dbpath)
-        if truncate:
+        if reset:
             self.reduce_db()
         self.extend_db()
 
@@ -86,8 +82,8 @@ class PhotoNotesDB:
         """ remove tables added """
         with self.wrapped_store.db as con:
             con.execute("BEGIN TRANSACTION;")
-            con.execute("DROP TABLE flickr_image;")
-            con.execute("DROP TABLE flickr_blog;")
+            con.execute("DROP TABLE IF EXISTS flickr_image;")
+            con.execute("DROP TABLE IF EXISTS flickr_blog;")
             con.execute("COMMIT TRANSACTION;")
 
     def extend_db(self):
@@ -157,11 +153,9 @@ class FlickrImageStorage(SqliteStorage):
         """ factory method to create FlickrPhotoNote from SQLite row """
         image = FlickrPhotoNote(row["image_key"], row["guid_note"])
 
-        image.see_info = row["see_info"]
-        image.reference = row["reference"]
+        image.is_primary = row["is_primary"]
         image.note_tags = row["note_tags"]
         image.blog_id = row["blog_id"]
-        image.need_cleanup = row["need_cleanup"]
         image.entry_updated = FlickrDate(row["entry_updated"])
         image.date_verified = FlickrDate(row["date_verified"])
         image.photo_id = row["photo_id"]
@@ -185,11 +179,12 @@ class FlickrImageStorage(SqliteStorage):
             image = self._load_photo_note(row)
             return image
 
-    def lookup_by_key(self, image_key: str) -> FlickrPhotoNote:
+    def lookup_primary(self, image_key: str, guid_note: str) -> FlickrPhotoNote:
+        """ lookup primary Flickr image for given note """
         with self.db as con:
             cur = con.execute(
-                "SELECT * FROM flickr_image WHERE image_key=?",
-                (image_key,),
+                "SELECT * FROM flickr_image WHERE image_key=? AND guid_note=? AND is_primary=1",
+                (image_key, guid_note),
             )
             # note that image_key is primary key, so expect one row or nothing
             row = cur.fetchone()
@@ -199,35 +194,41 @@ class FlickrImageStorage(SqliteStorage):
                 photo_note = self._load_photo_note(row)
                 return photo_note
 
-    def update(self, image):
+    def update(self, photonote, flickr_link, is_primary):
         """ create or update image in database """
-        dbkeys = []
+        previous_update = photonote.entry_updated
+        values = {
+            'entry_updated': FlickrDate.today().serialize(),
+            'image_key': is_primary,
+            'photo_id': flickr_link['photo_id'],
+            'blog_id': flickr_link['blog_id'],
+            'guid_note': photonote.guid_note,
+            'note_tags': photonote.note_tags,
+            'date_verified': photonote.date_verified.serialize(),
+            # info from Flickr we currently do not yet have - FUTURE addition
+            # 'secret_id',
+            # 'size_suffix',
+            # 'photo_taken',
+            # 'photo_uploaded',
+            # 'is_gone'
+        }
+        dbkeys = list(values.keys())
         dbvalues = []
-        previous_update = None
-        for key in image.__dict__.keys():
-            if key.startswith('_'):
-                continue
-            dbkeys.append(key)
-            value = getattr(image, key)
-            if key == 'entry_updated':
-                previous_update = value
-                value = FlickrDate.today().serialize()
-            elif isinstance(value, FlickrDate):
-                value = value.serialize()
-            dbvalues.append(value)
+        for key in dbkeys:
+            dbvalues.append(values[key])
 
         markers = ('?, '*len(dbkeys))[:-2]
         with self.db as con:
             con.execute(
                 "replace into flickr_image(%s) values (%s)" % (', '.join(dbkeys), markers),
                 tuple(dbvalues),
-                ## noqa: WPS441 ??  # TODO cleanup
             )
-        image.entry_updated = FlickrDate.today()
+
         if previous_update:
-            logger.info(f"updated db entry for image key={image.image_key} previous_update={previous_update}")
+            logger.debug(f"updated photo-note  entry for image key={flickr_link['image_key']} "
+                         f"previous_update={previous_update}")
         else:
-            logger.debug(f"created db entry for image key={image.image_key}")
+            logger.debug(f"created photo-note entry for image key={flickr_link['image_key']}")
 
 
 def lookup_note(store: SqliteStorage, note_guid: str) -> Optional[Note]:

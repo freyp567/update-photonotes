@@ -63,9 +63,8 @@ class FlickrPhotoNote(object):
     def __init__(self, image_key: str, guid_note: str):
         self.image_key = image_key
         self.guid_note = guid_note
-        self.see_info = None
+        self.is_primary = False
 
-        self.reference = None
         self.note_tags = None
         self.blog_id = None
         self.need_cleanup = ''
@@ -79,7 +78,10 @@ class FlickrPhotoNote(object):
         self.is_gone = False
 
     def __str__(self):
-        return f"FlickrImage( self.image_key)"
+        return f'image_key={self.image_key}'
+
+    def __repr__(self):
+        return f"FlickrPhotoNote({self.image_key}, guid={self.guid_note})"
 
     def add_cleanup(self, value):
         cleanups = set(self.need_cleanup.split('|'))

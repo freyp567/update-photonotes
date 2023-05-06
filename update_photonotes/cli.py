@@ -76,6 +76,13 @@ def updater(quiet:bool, verbose:bool) -> None:
 
 
 @updater.command(
+    help="""Reset Photonotes db"""
+)
+def reset_db():
+    cli_app.reset_db()
+
+
+@updater.command(
     help="""Update Photonotes db from Evernote notes in backup db
     
     e.g. 
@@ -123,7 +130,7 @@ def update_db(
     options.limit = limit
     options.skip = skip
     options.debug = os.getenv("DEBUG") == '1'
-    options.warn_http = False  # True to output warning if http (non https) links found
+    options.warn_href_http = False  # True to output warning if http (non https) links found
     options.note_title = note_title
 
     cli_app.update_db(

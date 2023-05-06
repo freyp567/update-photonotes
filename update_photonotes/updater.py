@@ -2,6 +2,7 @@
 Encapsulates update handling
 """
 
+import os
 import datetime
 from pathlib import Path
 from typing import Optional
@@ -21,11 +22,13 @@ from .note_utils import Note2
 
 import logging
 logger = logging.getLogger('app.updater')
-
+logger.setLevel(os.getenv("LOG_LEVEL") or "INFO")
 
 FLICKR_URL = "https://www.flickr.com/"
 FLICKR_PHOTO_URL = "https://www.flickr.com/photos/"
-NO_UPDATE_AGE = 3*30  # do not update photo notes that got updated in last 3 months
+
+# do not update photo-note that got updated in last 3 months
+NO_UPDATE_AGE = int(os.getenv("NO_UPDATE_AGE", "0")) or 3*30
 
 TAG_NAME_PHOTONOTE = "flickr-image"
 TAG_NAME_BLOGNOTE = "flickr-blog"
@@ -43,7 +46,7 @@ class NotesUpdater:
 
     def update(self, notebook: str) -> None:
         self.count = 0
-        export_enex = (self.options.export_dir is not None)
+        export_enex = (self.options.export_dir is not None)  # TODO cleanup
 
         notes = self.notes_db.store.notes
         if not self.options.debug:
@@ -239,14 +242,16 @@ found see:
     def _fetch_photonote(self, note: Note2, image_key: str) -> tuple:
         """ fetch photo-note (if one exists), handle updates and moves in EN """
         def log_note(note: Note2):
-            updated = datetime.datetime.fromtimestamp(note.date_updated)
-            return f"{note} updated={updated}"
+            updated = note.date_updated()
+            return f"{note} ({note.en_note.guid}) updated={updated}"
 
         other_note = None
 
         # lookup photo-note for given image_key
         try:
-            photo_note = self.notes_db.flickrimages.lookup_by_key(image_key)
+            photo_note = self.notes_db.flickrimages.lookup_primary(
+                image_key, note.en_note.guid
+            )
         except PhotoNoteNotFound:
             photo_note = None
 
@@ -517,10 +522,11 @@ found see:
             if link_info:
                 if not see_info:
                     logger.debug(f'missing see-info for photo note {note}')
+                    result['link'] = None
                 elif link_info['photo_id'] not in see_info:
                     logger.warning(f'{self.pos}| see-info not related to photo id {link_info["photo_id"]}: "{see_info}"')
                     # need to check correspondence manually
-                    need_cleanup.add("see-info mismatch with image link")
+                    result['link'] = None
 
                 if link_info.get('other_photonote'):
                     # already have a photo-note, but a different one
@@ -601,7 +607,7 @@ found see:
                     continue
 
                 # for debugging, it is somethimes useful to be able to pick a photo-note by title
-                if self.options.note_title and note.title != self.options.note_title:
+                if self.options.note_title and self.options.note_title not in note.title:
                     continue
                 handler(note2, export_enex)
 
@@ -628,7 +634,7 @@ found see:
                 _write_export_file(note_path, note)
 
     def _update_flickr_image(self, note: Note2, export_enex: bool) -> None:
-        """ examine and update photo note """
+        """ examine and update photo-note """
         self.warnings = {}  # drop warnings from previous notes
 
         photo_info = self._analyze_photo_note(note)
@@ -652,7 +658,7 @@ found see:
                 # photo note entry from db, check when it got last updated (or created)
                 age = photo_note.entry_updated.value - datetime.date.today()
                 if age < datetime.timedelta(days=NO_UPDATE_AGE):
-                    # avoid updating notes that have been updated recently  # TODO verify usecase
+                    # avoid updating notes that have been updated recently
                     need_update = False
                 else:
                     logger.debug(f'photonote last updated {age} days ago: {note}')
@@ -670,22 +676,30 @@ found see:
             logger.warning(f'note without link to photo: {note}')
             need_update = False
 
-        if photo_info.get('need_cleanup'):
-            need_update = True
-
-        if not need_update:
-            return
-
         if photo_info.get('photo_note') is None:
             logger.warning(f'cannot update, have no photo note for {note}')
             return
 
         self.count += 1
 
-        # TODO fetch photo info from Flickr and update photo note
+        if need_update:
+            # TODO fetch photo info from Flickr and update photo note
+            # photo_note.entry_updated = FlickrDate.today() # set after update
+            need_update = False
 
-        # update note in SQLite db
-        self.notes_db.flickrimages.update(photo_info['photo_note'])
+        # update flickr_image in SQLite db
+        primary_link = photo_info['link']
+        if primary_link:
+            self.notes_db.flickrimages.update(
+                photo_info['photo_note'], primary_link, True
+            )
+        for image_key in photo_info['all']:
+            if not primary_link or image_key != primary_link['image_key']:
+                stacked_link = photo_info['all'][image_key]
+                self.notes_db.flickrimages.update(
+                    photo_info['photo_note'], stacked_link, False
+                )
+
 
         # TODO export enex only if note requires update in Evernote
         # but currently cannot detect / handle / no sync (yet) from Flickr so commented out
@@ -704,16 +718,15 @@ found see:
             raise RuntimeError("reached notes limit")
         return
 
-    def _create_photo_note(self, link_info: dict, result: dict, note: Note, reference: Optional[dict] = None) -> FlickrPhotoNote:
+    def _create_photo_note(self, link_info: dict, result: dict, note: Note) -> FlickrPhotoNote:
         """ factory method to create photo note from note info and Flickr image link """
         logger.debug(f'new photo note image key={link_info["image_key"]}: {note}')
-        pnote = FlickrPhotoNote(link_info["image_key"], note.guid)
+        photo_note = FlickrPhotoNote(link_info["image_key"], note.en_note.guid)
         photo_id = link_info.get('photo_id')
         if photo_id in ('albums', ):
             # happens when a link to an album is embedded in photo description
             logger.error(f'invalid photo_id={photo_id} for note {note}')
             return None
-
 
         # extract image specific properties from see-info
         if result.get('see'):
@@ -721,9 +734,8 @@ found see:
             if photo_id not in see:
                 logger.warning(f'{self.pos}| missing image id {photo_id} in {see} for {note}')
                 # needs manual verification. so set need_cleanup
-                pnote.add_cleanup("missing image_id in see-info")
+                photo_note.add_cleanup("missing image_id in see-info")
 
-            pnote.see_info = see
             if '|' in see:
                 logger.debug(f"{self.pos}| truncate see-info at slash: {see}")
                 see = see.split('|')[0].strip()
@@ -731,16 +743,16 @@ found see:
             if len(see_parts) > 1:
                 if see_parts[-1] == 'crdownload':
                     logger.warning(f"{self.pos}| detected bad see-info: {see}")
-                    pnote.add_cleanup("missing image_id in see-info")
+                    photo_note.add_cleanup("missing image_id in see-info")
                     see_parts = see_parts[:-1]
                 see_filetype = see_parts[-1].split(' ')[0].strip()
                 if see_filetype in ('png',):
                     logger.warning(f"{self.pos}| detected see-info referencing non JPEG: {see}")
                     # candidate for cleanup, should not use .png
-                    pnote.add_cleanup(f"undesired image type {see_filetype}")
+                    photo_note.add_cleanup(f"undesired image type {see_filetype}")
                 elif see_filetype not in ('jpeg', 'jpg', 'mp4', ):
                     logger.warning(f"unexpected suffix in see-info: {see}")
-                    pnote.add_cleanup("{self.pos}| unrecognized filetype suffix in see-info")
+                    photo_note.add_cleanup("{self.pos}| unrecognized filetype suffix in see-info")
                 fn_parts = see_parts[-2].split('_')
                 while fn_parts and not fn_parts[-1]:
                     # drop trailing underscore, e.g. in 'jeffstamer 52148827555 _Tower of Terror_.jpeg'
@@ -749,23 +761,19 @@ found see:
                 if len(fn_parts) >= 3 and is_size_suffix(fn_parts[-1]):
                     # len restriction to avoid false positives, see e.g.
                     # '_ The Vikings _ 137473925@N08 41831720970.jpeg'
-                    pnote.secret_id = fn_parts[-2].split(' ')[-1]
-                    pnote.size_suffix = fn_parts[-1]
+                    photo_note.secret_id = fn_parts[-2].split(' ')[-1]
+                    photo_note.size_suffix = fn_parts[-1]
                 else:
-                    pnote.size_suffix = None
+                    photo_note.size_suffix = None
 
-        pnote.reference = reference
-        pnote.note_tags = '|%s|' % '|'.join(note.tagNames)
-        pnote.blog_id = link_info['blog_id']
+        tag_values = '|'.join(note.en_note.tagNames)
+        photo_note.note_tags = f'|{tag_values}|'
+        photo_note.blog_id = link_info['blog_id']
         # note: .entry_updated will be set later on by update method - need None to detect that new record
-        pnote.entry_updated = FlickrDate(None)
-        pnote.date_verified = FlickrDate.today()
-        pnote.photo_id = link_info['photo_id']
-
-        #pnote.photo_taken =  FlickrDate(TODO)  # from Flickr
-        #pnote.photo_uploaded =  FlickrDate(TODO)  # from Flickr
-
-        return pnote
+        photo_note.entry_updated = FlickrDate(None)
+        photo_note.date_verified = FlickrDate.today()
+        photo_note.photo_id = link_info['photo_id']
+        return photo_note
 
 
 def is_size_suffix(value):
