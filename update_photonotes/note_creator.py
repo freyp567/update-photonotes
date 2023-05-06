@@ -63,7 +63,7 @@ class NoteCreator:
         self.import_path = self.base_path / "import"
         self.import_path.mkdir(exist_ok=True)
 
-        flickr_utils.authenticate(use_auth_session=False)
+        flickr_utils.authenticate(use_auth_session=options.use_auth_session)
         if os.environ.get('REQUESTS_CACHE') != '1':
             self.session = requests.session()
         else:
@@ -364,8 +364,8 @@ class NoteCreator:
             en_note = None
             note_title = photo.title
 
-        self.params['flickr_title'] = photo.title
-        self.params['note_title'] = note_title
+        self.params['flickr_title'] = utils.quote_xml(photo.title)
+        self.params['note_title'] = utils.quote_xml(note_title)
 
         blog_id = user.path_alias or user.id
         img_path = self.base_path / "blogs" / blog_id / "images"
@@ -568,8 +568,16 @@ class NoteCreator:
             return None
         return note
 
+    def is_photo_url(self, url):
+        if url.startswith('https://www.flickr.com/photos/'):
+            return True
+        if url.startswith('https://flickr.com/photos/'):
+            return True
+        return False
+
     def create_note(self, flickr_url: str) -> bool:
-        assert flickr_url.startswith('https://www.flickr.com/photos/'), "must have a Flickr URL"
+        if not self.is_photo_url(flickr_url):
+            raise ValueError(f"not a valid Flickr UR:: {flickr_url}")
         if re.search(r':\d+$', flickr_url):
             parts = flickr_url.split(':')
             pageno = int(parts[-1])
