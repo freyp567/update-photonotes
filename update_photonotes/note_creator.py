@@ -550,13 +550,14 @@ class NoteCreator:
     def lookup_photonote(self, blog_id: str, photo_id: str) -> Optional[FlickrPhotoNote]:
         image_key = f"{blog_id}|{photo_id}"
         try:
-            found = self.notes_db.flickrimages.lookup_by_key(image_key)
+            found = self.notes_db.flickrimages.lookup_image(image_key, is_primary=None)
         except PhotoNoteNotFound:
             logger.debug(f"no photo-note found for image key={image_key}")
             return None
         else:
-            logger.info(f"found photo-note / image for {image_key}")
-            return found
+            logger.info(f"found photo-note / image for {image_key} #={len(found)}")
+            # we potentially get more than one - pick first
+            return found[0]
 
     def lookup_en_note(self, photo_note: FlickrPhotoNote) -> Optional[Note]:
         """ lookup Evernote note in evernote-backup db """

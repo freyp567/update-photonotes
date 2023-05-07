@@ -196,7 +196,7 @@ class BlogCreator:
         current_city = utils.get_safe_property(user, "location")
         current_city = utils.quote_xml(current_city) if current_city else "---"
         props = [
-            ("Joined", flickr_utils.get_firstdate(user)),
+            ("First date", flickr_utils.get_firstdate(user)),
             ("First taken", flickr_utils.get_firstdatetaken(user)),
             ("Current city", current_city),
         ]
