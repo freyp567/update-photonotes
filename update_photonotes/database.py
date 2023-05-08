@@ -222,7 +222,7 @@ class FlickrImageStorage(SqliteStorage):
                 photo_note = self._load_photo_note(row)
                 return photo_note
 
-    def update_image(self, photonote, flickr_link, is_primary):
+    def update_image(self, photonote, flickr_link, is_primary, log_changes=True):
         """ create or update image in database """
         updated_before = photonote.entry_updated
         values = {
@@ -253,11 +253,14 @@ class FlickrImageStorage(SqliteStorage):
                 tuple(dbvalues),
             )
 
-        if updated_before:
-            logger.debug(f"updated photo-note  entry for image key={flickr_link['image_key']} "
-                         f"previous_update={updated_before}")
-        else:
-            logger.info(f"created photo-note entry for image key={flickr_link['image_key']}")
+        if log_changes:
+            info = f"photo-note entry for image key={flickr_link['image_key']} "
+            if is_primary:
+                info += "[primary] "
+            if updated_before:
+                logger.info(f"updated {info} updated_before={updated_before}")
+            else:
+                logger.info(f"created {info}")
 
 
 def lookup_note(store: SqliteStorage, note_guid: str) -> Optional[Note]:

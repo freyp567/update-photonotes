@@ -568,10 +568,7 @@ class NoteCreator:
         return note
 
     def is_photo_url(self, url):
-        if url.startswith('https://www.flickr.com/photos/'):
-            return True
-        if url.startswith('https://flickr.com/photos/'):
-            return True
+        return flickr_utils.is_flickr_url(url, 'photos/')
         return False
 
     def create_note(self, flickr_url: str) -> bool:

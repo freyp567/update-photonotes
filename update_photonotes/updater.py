@@ -14,6 +14,7 @@ from evernote_backup.note_exporter_util import SafePath
 from evernote.edam.type.ttypes import Note
 
 
+from .flickr_utils import is_flickr_url
 from .conversion import get_note_content
 from .flickr_types import FlickrPhotoNote, FlickrDate
 from .database import PhotoNotesDB, lookup_note
@@ -32,6 +33,11 @@ NO_UPDATE_AGE = int(os.getenv("NO_UPDATE_AGE", "0")) or 3*30
 
 TAG_NAME_PHOTONOTE = "flickr-image"
 TAG_NAME_BLOGNOTE = "flickr-blog"
+
+NO_SEE_INFO = (
+    '(not archived)',
+    '-NA-',
+)
 
 class NotesUpdater:
 
@@ -184,18 +190,29 @@ class NotesUpdater:
         extract image info - second edition / replaces _extract_see_v1
         """
 
+        def get_highlight(node):
+            # is_highlight = node.xpath("span", _style="--en-highlight:yellow")  # produces false positives
+            # is_highlight = len(node.xpath("//span[contains(@style, '--en-highlight:yellow')]")) > 0  # dito
+            # avoid false positives
+            frag_text = etree.tostring(node).decode('utf-8')
+            if "--en-highlight:yellow" in frag_text:
+                if frag_text.count("--en-highlight:yellow") != 1:
+                    logger.warn(f"found multiple highlight sections in: {frag_text}")
+                    self.add_warning("cleanup required", "multiple highlights in see-info")
+                return True
+            return False
+
         def get_see_text(node):
             node_info = etree.tostring(node)
             see_info = ' '.join([f.strip() for f in node.xpath(".//text()")])
             see_info = see_info[4:].strip()   # strip see: prefix
-            is_highlight = node.xpath("span", _style="--en-highlight:yellow")
+
+            is_highlight = get_highlight(node)
             if is_highlight:
-                if len(is_highlight) > 1:
-                    self.add_warning("cleanup required", "multiple highlights in see-info")
-                    logger.warning(f"found multiple highlight sections in see-info div: {node_info}")
-                value = ' '.join([f.strip() for f in is_highlight[0].xpath(".//text()")])
-                if value:
-                    value = value.strip()
+                # value = ' '.join([f.strip() for f in is_highlight[0].xpath(".//text()")])
+                value = see_info
+                if '|' in value:
+                    value = value.split('|')[0].strip()
                 if not value:
                     logger.warning(f"ignore highlight with only whitespace in {node_info}")
                     return ""
@@ -208,13 +225,13 @@ class NotesUpdater:
                 value = '+' + see_info
             return value
 
-        see_divs = xml.xpath('//div[substring-after(text(), "see:")]')
+        see_divs = xml.xpath('//*[substring-after(text(), "see:")]')  # div or span
         if not see_divs:
             self.add_warning("cleanup required", "missing see-info")
             return None
 
         see_highlight = []
-        see_found = []  # accumlate see-infos for stacked images
+        see_found = []  # accumulate see-infos for stacked images
         for node in see_divs:
             see_info = get_see_text(node)
             if not see_info:
@@ -231,9 +248,12 @@ class NotesUpdater:
             else:
                 return see_highlight[0]
 
-        if see_found and see_found[-1] in ('+(not archived)', '+-NA-'):
-            logger.debug(f'{self.pos}| found see-info, is {see_found[-1][1:]!r} for {note}')
-            return None
+        if see_found:
+            last_see = see_found[-1][1:]
+            if last_see in NO_SEE_INFO:
+                logger.debug(f'{self.pos}| found see-info, is {last_see!r} for {note}')
+                return None
+            logger.debug(f'{self.pos}| have see-info, is {last_see!r} for {note}')
 
         all_sees = "\n   ".join(see_found)
         logger.warning(f'''{self.pos}| missing highlighted see-info in {note}
@@ -380,7 +400,7 @@ found see:
                     lines.append(text)
                 else:
                     lines.append(f"{href} | {text}")
-                if len(lines) >= 3:
+                if len(lines) > 3:
                     lines.append(f'... {len(lines) - 3} more ...')
                     break
 
@@ -475,30 +495,30 @@ found see:
                         # may have added
                         break
 
-                elif href.startswith('https://www.flickr.com/search/'):
+                elif is_flickr_url(href, 'search/'):
                     # location info, e.g. 'https://www.flickr.com/search/?lat=...'
                     pass
 
-                elif href.startswith('https://flickr.com/groups'):
+                elif is_flickr_url(href, 'groups'):
                     pass
 
-                elif href.startswith('https://www.flickr.com/map/'):
+                elif is_flickr_url(href, 'map/'):
                     # flickr map url, e.g. 'https://www.flickr.com/map/?fLat=...&fLon=...8...'
                     pass
 
-                elif href.startswith('https://www.flickr.com/groups/'):
+                elif is_flickr_url(href, 'groups/'):
                     # e.g. 'https://www.flickr.com/groups/(groupid))/'
                     pass
 
-                elif href.startswith('https://www.flickr.com/people/'):
+                elif is_flickr_url(href, 'people/'):
                     # e.g. 'https://www.flickr.com/people/(blogid))/'
                     pass  # TODL extract link to photo blog - but need to check blogid to match note
 
-                elif href.startswith('https://www.flickr.com/explore/'):
+                elif is_flickr_url(href, 'explore/'):
                     # e.g. https://www.flickr.com/explore/2022/10/03
                     pass
 
-                elif href.startswith('https://www.flickr.com/redirect?url='):
+                elif is_flickr_url(href, 'redirect?url='):
                     # e.g. 'https://www.flickr.com/redirect?url=https://www.instagram.com/(userid)'
                     pass
 
@@ -524,8 +544,9 @@ found see:
             see_info = result.get('see')
             if link_info:
                 if not see_info:
-                    # have primary image without see-info: it may be the wrong one
-                    logger.debug(f'missing see-info for photo note {note}')
+                    # happens if photo-note without see-info, e.g. for video
+                    image_key = link_info.get('image_key')
+                    logger.info(f'missing see-info for link {image_key} in photo-note:\n{note}')
 
                 elif link_info['photo_id'] not in see_info:
                     logger.warning(f'{self.pos}| see-info not related to photo id {link_info["photo_id"]}: "{see_info}"')
@@ -638,6 +659,7 @@ found see:
 
     def _update_flickr_image(self, note: Note2, export_enex: bool) -> None:
         """ examine and update photo-note """
+        debug = os.getenv("DEBUG")
         self.warnings = {}  # drop warnings from previous notes
 
         pnote_info = self._analyze_photo_note(note)
@@ -699,13 +721,17 @@ found see:
         # update flickr_image in SQLite db
         if primary_link:
             self.notes_db.flickrimages.update_image(
-                pnote_info['photo_note'], primary_link, True
+                pnote_info['photo_note'], primary_link,
+                is_primary=True,
+                log_changes=debug
             )
         for image_key in pnote_info['all']:
             if not primary_link or image_key != primary_link['image_key']:
                 stacked_link = pnote_info['all'][image_key]
                 self.notes_db.flickrimages.update_image(
-                    pnote_info['photo_note'], stacked_link, False
+                    pnote_info['photo_note'], stacked_link,
+                    is_primary = False,
+                    log_changes=debug
                 )
 
 
@@ -758,7 +784,7 @@ found see:
                     logger.warning(f"{self.pos}| detected see-info referencing non JPEG target:\n{see}")
                     # candidate for cleanup, should not use .png
                     photo_note.add_cleanup(f"undesired image type {see_filetype}")
-                elif see_filetype not in ('jpeg', 'jpg', 'mp4', ):
+                elif see_filetype not in ('jpeg', 'jpg', 'mp4', 'video'):
                     logger.warning(f"unexpected suffix in see-info: {see}")
                     photo_note.add_cleanup("{self.pos}| unrecognized filetype suffix in see-info")
                 fn_parts = see_parts[-2].split('_')

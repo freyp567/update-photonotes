@@ -14,6 +14,19 @@ import logging
 logger = logging.getLogger('flickr_utils')
 
 
+def is_flickr_url(url, suffix='', allow_http=False):
+    if url.startswith(f'https://www.flickr.com/{suffix}'):
+        return True
+    if url.startswith(f'https://flickr.com/{suffix}'):
+        return True
+    if allow_http:
+        if url.startswith(f'http://www.flickr.com/{suffix}'):
+            return True
+        if url.startswith(f'http://flickr.com/{suffix}'):
+            return True
+    return False
+
+
 def get_auth_file():
     script_dir = utils.get_script_dir()
     return script_dir / "session.auth"
