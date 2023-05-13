@@ -135,7 +135,9 @@ def cleanup_description(desc: str) -> str:
     xml = etree.fromstring('<div class="note-description">' + desc + '</div>')
     for anchor in xml.xpath("//a"):
         href = anchor.attrib.get("href")
-        link_text = anchor.text.strip()
+        link_text =  " ".join(anchor.xpath(".//text()"))
+        if not link_text:
+            link_text = href
         if link_text == href:
             href = utils.quote_xml(href)
             markup_text = f'<span><br/>[link]({href})<br/></span>'
