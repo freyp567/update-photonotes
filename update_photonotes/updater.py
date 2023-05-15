@@ -426,6 +426,8 @@ found see:
                 href = anchor.attrib.get("href")
                 if not href or 'flickr.com' not in href:
                     continue
+                if href.startswith("https://api.flickr.com/photos/tags"):
+                    continue
                 if href.startswith('http://www.flickr.com/'):
                     # differentiate if url from photo author (in description) or own
                     media_before = anchor.xpath("preceding::en-media")
@@ -714,9 +716,9 @@ found see:
         if update_flickr_info:
             # TODO fetch photo info from Flickr and update photo note
             image_key = primary_link['image_key']
-            logger.info(f"updating Flickr info for image {image_key} -- TODO")  # TODO
+            ##logger.info(f"updating Flickr info for image {image_key} -- TODO")  # TODO log blaot, currently
             # this is primary image, update stacked images, too
-            # photo_note.entry_updated = FlickrDate.today() # set after update
+            photo_note.entry_updated = FlickrDate.today()  # set after update
 
         # update flickr_image in SQLite db
         if primary_link:
