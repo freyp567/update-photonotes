@@ -716,7 +716,7 @@ found see:
         if update_flickr_info:
             # TODO fetch photo info from Flickr and update photo note
             image_key = primary_link['image_key']
-            ##logger.info(f"updating Flickr info for image {image_key} -- TODO")  # TODO log blaot, currently
+            logger.info(f"updating Flickr info for image {image_key} -- TODO")
             # this is primary image, update stacked images, too
             photo_note.entry_updated = FlickrDate.today()  # set after update
 

@@ -24,6 +24,9 @@ to handle cases where same image link is associated with more than on e photo-no
 - detect and handle replaced notes (e.g. from cleanup of see-info)
 - fix and improve handling of see-info detection (less false-positives)
 
+#### create-note
+- for (yet) unknown license types, add tag license-other
+
 ### Fixes
 - ignore deleted notes
 - fix issue with note titles, encode ampersands to produce valid XML

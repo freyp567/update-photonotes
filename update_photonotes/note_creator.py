@@ -100,7 +100,8 @@ class NoteCreator:
         license_info = flickr_utils.get_license_info(photo)
         if not license_info:
             logger.info(f"unknown license_id={photo.license!r} for {photo.urls}")
-            license_info = f'License Type {photo.license}'
+            note_tags.add("license-other")
+            license_info = f'unknown License Type {photo.license}'
         elif photo.license != '0':
             note_tags.add("freepic")
             note_tags.add("license-%s" % license_info.replace('CC ', 'CC_').replace(' ', ''))
@@ -683,7 +684,7 @@ error details:
 
         self.params.update({
             'blog_id': blog_id,
-            'user_name': user.username,
+            'user_name': utils.quote_xml(user.username),
             'user_location': utils.quote_xml(user_location) or "(no location)",
             'real_name': user_realname,
             'profile_url': user.profileurl,
@@ -701,7 +702,7 @@ error details:
         user_info += f"{user.username} | {blog_id}"
         if user_location:
             user_info += f" || {user_location}"
-        self.params['user_info'] = user_info
+        self.params['user_info'] = utils.quote_xml(user_info)
 
         # lookup photo by id
         photo = self.lookup_photo_by_id(user, photo_id, pageno)
