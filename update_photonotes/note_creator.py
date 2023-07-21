@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 import hashlib
 import csv
+from ratelimit import limits, sleep_and_retry
 
 from .database import PhotoNotesDB, lookup_note
 from .flickr_types import FlickrPhotoNote
@@ -37,6 +38,11 @@ logger = logging.getLogger('create_note')
 # number of images per page - 500 is maximum allowed
 # use maximum for flickr_api.Photo.search to reduce number of API calls for larger photo streams
 IMAGES_PER_PAGE = 500
+
+
+LIMIT_PHOTOS_INTERVAL = 600  # 10 minutes, in seconds
+LIMIT_PHOTOS_COUNT = 500  # photos per interval 500 per 10 m => 3000 per hour
+# flickr demands to stay under 3600 queries per hour
 
 class NoteCreator:
 
@@ -262,6 +268,29 @@ class NoteCreator:
             self.params['groups_info'] = 'no groups'
         return
 
+    # throttle API calls to stay below limit of 3600 calls per hhour
+    @limits(calls=LIMIT_PHOTOS_COUNT, period=LIMIT_PHOTOS_INTERVAL)
+    def get_photo_info(self, photo: Photo, pos: int) -> dict:
+        photo_title = photo.title or ''
+        logger.debug(f"{pos} | {photo.id} - {photo_title!r}")
+        photo_description = photo.description or ''
+        photo_description = photo_description.strip().replace('\n', '|')
+
+        uploaded = datetime.datetime.fromtimestamp(int(photo.dateuploaded))
+        image_info = {
+            'pos': pos,
+            'photo_id': photo.id,
+            'photo_title': photo_title,
+            'dateuploaded': uploaded.isoformat()[:10],
+            'description': photo_description[:1000],
+            # additional properties may cost as causing additional api calls (e.g. .license), so omit
+            # 'photo_taken': flickr_utils.get_taken(photo),
+            # 'photo_uploaded': flickr_utils.get_uploaded(photo),
+            # 'license': photo.license,  # expensive, costs an API call
+            # 'lastupdate': flickr_utils.get_lastupdate(photo),
+        }
+        return image_info
+
     def lookup_photo_by_id(self, user: Person, photo_id: str, pageno: Optional[int] = None) -> Optional[Photo]:
         """ lookup photo by id """
         # not always working but slowing down creation, so commented out:
@@ -293,43 +322,39 @@ class NoteCreator:
             "safe_search!": 3,
             # "content_types": 0,  # photos only? mostly photos, so unimportant to restrict
             "per_page": IMAGES_PER_PAGE,
-            "extras": "description,license,date_upload,date_taken,owner_name,last_update",
+            "extras": "title,description,date_upload,date_taken,owner_name,last_update",
         }
         for photo in flickr_api.Walker(
                 flickr_api.Photo.search,
                 **search_params,
         ):
-            # unfortunately cannot pass photo_id, ignored
+            # unfortunately cannot pass photo_id, is ignored / not handled
             pos += 1
             if photo.id == photo_id:
                 logger.info(f"image found for {photo_id} at pos={pos}")
                 return photo
-            photo_title = photo.title
-            logger.debug(f"{pos} | {photo.id} - {photo_title!r}")
+            image_list.append(self.get_photo_info(photo, pos))
 
-            image_list.append({
-                'pos': pos,
-                'photo_id': photo.id,
-                'photo_title': photo_title,
-                # additional properties may cost as causing additional api calls (e.g. .license), so omit
-                # 'photo_taken': flickr_utils.get_taken(photo),
-                # 'photo_uploaded': flickr_utils.get_uploaded(photo),
-                # 'license': photo.license,  # expensive, costs an API call
-                # 'lastupdate': flickr_utils.get_lastupdate(photo),
-            })
+            # if pos > self.options.max_pos:
+            #     # limit to avoid excessive api calls
+            #     logger.warning(f"failed to find image before pos={pos}, stop")
+            #     break
 
-            if pos > self.options.max_pos:
-                # limit to avoid excessive api calls
-                logger.warning(f"failed to find image before pos={pos}, stop")
-                break
+            # we throttle calls to get_photo_info now, so no need have hard limit
+            # but show progress so user may decide if to continue or abort (using keyboard interrupt)
+            if pos % 200 == 0:
+                logger.info(f"scanning pages to find image ... ({pos}) ...")
 
         logger.error(f"image not found for {photo_id} pos={pos}")
 
         # dump image_list for manual inspection
         csv_path = self.import_path / f"{user.id} photos.csv"
-        with csv_path.open(encoding='utf-8-sig', mode='w') as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=image_list[0].keys())
+        csv_fields = ('pos', 'photo_id', 'photo_title', 'dateuploaded')
+        with csv_path.open(encoding='utf-8-sig', newline='', mode='w') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=csv_fields, extrasaction='ignore')
             writer.writerows(image_list)
+        json_path = self.import_path / f"{user.id} photos.json"
+        json_path.write_text(json.dumps(image_list, indent=4, default=str))
         return None
 
     def create_content(self,
