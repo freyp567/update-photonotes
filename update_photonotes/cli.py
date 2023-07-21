@@ -36,9 +36,6 @@ from . import cli_app
 setup_logging()
 logger = logging.getLogger('updater')
 
-# limit number of images that are walked to to avoid exceeding limit of 3600 api calls per hour
-MAX_PHOtO_POS = 5000
-
 @click.group(cls=NaturalOrderGroup)
 @optgroup.group("Verbosity", cls=MutuallyExclusiveOptionGroup)  # type: ignore
 @optgroup.option(  # type: ignore
@@ -76,6 +73,13 @@ def updater(quiet:bool, verbose:bool) -> None:
 
 
 @updater.command(
+    help="""Reset Photonotes db"""
+)
+def reset_db():
+    cli_app.reset_db()
+
+
+@updater.command(
     help="""Update Photonotes db from Evernote notes in backup db
     
     e.g. 
@@ -89,6 +93,10 @@ def updater(quiet:bool, verbose:bool) -> None:
 )
 @click.option(
     '--tag-name',
+    required=False,
+)
+@click.option(
+    '--note-title',
     required=False,
 )
 @click.option(
@@ -110,6 +118,7 @@ def update_db(
         limit: int,
         skip: int = 0,
         tag_name: Optional[str] = None,
+        note_title: str = None
 ) -> None:
     """ Create photonote either from url passed or the one passed on clipboard """
     options = SimpleNamespace()
@@ -118,7 +127,8 @@ def update_db(
     options.limit = limit
     options.skip = skip
     options.debug = os.getenv("DEBUG") == '1'
-    options.warn_http = False  # True to output warning if http (non https) links found
+    options.warn_href_http = False  # True to output warning if http (non https) links found
+    options.note_title = note_title
 
     cli_app.update_db(
         options,
@@ -163,6 +173,22 @@ def authenticate(
 
 
 @updater.command(
+    help="""Extract content from .enex in filesystem. 
+    
+    Useful to examine content of a note exported in ENEX format from Evernote
+    to analyze content related issues,
+    """
+)
+@click.argument(
+    'enex_path',
+    type=str,
+    required=True,
+)
+def extract_content(enex_path):
+    cli_app.extract_content(enex_path)
+
+
+@updater.command(
     help="""Create photonote from Flickr URL to update Evernote
     
     Expects a Flickr URL to create note from (blog or photo)
@@ -179,7 +205,8 @@ def authenticate(
 @click.option(
     '--max-pos',
     type=int,
-    default=MAX_PHOtO_POS,
+    default=10000,
+    # 20000 - unable to lookup 25802865@N08/6373150511, but API calls: 45
     help="for image lookup, limit number of flickr images to scan before giving up"
 )
 def create_note(

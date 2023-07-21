@@ -14,6 +14,19 @@ import logging
 logger = logging.getLogger('flickr_utils')
 
 
+def is_flickr_url(url, suffix='', allow_http=False):
+    if url.startswith(f'https://www.flickr.com/{suffix}'):
+        return True
+    if url.startswith(f'https://flickr.com/{suffix}'):
+        return True
+    if allow_http:
+        if url.startswith(f'http://www.flickr.com/{suffix}'):
+            return True
+        if url.startswith(f'http://flickr.com/{suffix}'):
+            return True
+    return False
+
+
 def get_auth_file():
     script_dir = utils.get_script_dir()
     return script_dir / "session.auth"
@@ -122,7 +135,9 @@ def cleanup_description(desc: str) -> str:
     xml = etree.fromstring('<div class="note-description">' + desc + '</div>')
     for anchor in xml.xpath("//a"):
         href = anchor.attrib.get("href")
-        link_text = anchor.text.strip()
+        link_text =  " ".join(anchor.xpath(".//text()"))
+        if not link_text:
+            link_text = href
         if link_text == href:
             href = utils.quote_xml(href)
             markup_text = f'<span><br/>[link]({href})<br/></span>'

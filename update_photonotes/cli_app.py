@@ -15,6 +15,7 @@ from .authenticate import authenticate_session
 from .updater import NotesUpdater
 from .note_creator import NoteCreator
 from .blog_creator import BlogCreator
+from .note_utils import extract_enex_content
 
 import logging
 logger = logging.getLogger(__name__)
@@ -49,6 +50,18 @@ def authenticate(
     authenticate_session(options, permissions)
 
 
+def reset_db() -> None:
+    """ reset photonotes db """
+    db_path = get_db_path()
+    try:
+        logger.info(f"truncating photo notes in {db_path}")
+        PhotoNotesDB(db_path, reset=True)
+        logger.info(f"photo notes truncated")
+    except Exception as err:
+        logger.exception("failed to truncate {db_path}")
+    return
+
+
 def update_db(
         options: SimpleNamespace,
         notebook: str,
@@ -64,6 +77,13 @@ def update_db(
     else:
         # allow caller of script to handle error
         sys.exit(1)
+
+
+def extract_content(enex_path):
+    enex_path = Path(enex_path)
+    result = extract_enex_content(enex_path)
+    logger.info(f"extracted content see {result}")
+    return
 
 
 def create_note(options: SimpleNamespace, flickr_url: Optional[str] = None, ) -> None:

@@ -76,7 +76,7 @@ class BlogCreator:
             'today': datetime.date.today().isoformat(),
             'timestamp': datetime.datetime.now().isoformat()[:16],
         }
-        flickr_utils.authenticate(use_auth_session=True)
+        flickr_utils.authenticate(use_auth_session=options.use_auth_session)
         if os.environ.get('REQUESTS_CACHE') != "1":
             # no caching, but create a session
             self.session = requests.session()
@@ -196,7 +196,7 @@ class BlogCreator:
         current_city = utils.get_safe_property(user, "location")
         current_city = utils.quote_xml(current_city) if current_city else "---"
         props = [
-            ("Joined", flickr_utils.get_firstdate(user)),
+            ("First date", flickr_utils.get_firstdate(user)),
             ("First taken", flickr_utils.get_firstdatetaken(user)),
             ("Current city", current_city),
         ]
@@ -320,20 +320,27 @@ class BlogCreator:
         if blog_id != user.id:
             parts.append(user.id)
         note_title = ' | '.join([p.strip() for p in parts if p.strip()]) + ' | Flickr blog'
-        note_title = '[new] ' + note_title
+        note_title = '[new] ' + utils.quote_xml(note_title)
         location = utils.get_safe_property(user, 'location', None)
         if not location:
             # user.timezone if no location??
             location = "(no location)"
         # show user.path_alias ?
+        # <b>${real_name} | ${user_name} | ${blog_id} | ${user_location}</b>
+        person_info = []
+        if real_name and real_name != user.username:
+            person_info.append(real_name)
+        person_info.extend((user.username, blog_id))
+        if location and location != "(no location)":
+            person_info.append(location)
+        person_info = ' | '.join(person_info)
+
         self.params.update({
             'note_title': note_title,
             'flickr_url': flickr_url,
             'blog_url': user.profileurl,
             'blog_id': blog_id,
-            'user_name': user.username,
-            'user_location': utils.quote_xml(location),
-            'real_name': real_name,
+            'person_info':  utils.quote_xml(person_info),
             'profile_url': user.profileurl,
             'blog_info': blog_info,
         })
@@ -353,8 +360,10 @@ class BlogCreator:
 
         ok = True
         if has_error:
+            logger.error(f"generated content invalid: {has_error}; see {enex_path.stem}.xml")
             # output XML content for examination in case of errors - for troubleshooting only
-            enex_path.with_suffix('.xml').write_text(self.params['content'], encoding='utf-8')
+            invalid_content = f'<!-- {has_error} -->\n' + self.params['content']
+            enex_path.with_suffix('.xml').write_text(invalid_content, encoding='utf-8')
         else:
             # save generated enex file
             enex = self.from_template(self.template_file, self.params)

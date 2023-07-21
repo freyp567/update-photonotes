@@ -38,6 +38,8 @@ def load_dotenv():
 
 def quote_xml(value):
     """ quote characters in value for XML """
+    if not value:
+        return value
     xml = value
     if '&' in xml:
         assert '&#' not in xml

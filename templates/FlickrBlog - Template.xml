@@ -30,7 +30,7 @@ images:
 		<div>${today}</div>
 		<hr/>
 		<div>
-<b>${real_name} | ${user_name} | ${blog_id} | ${user_location}</b>
+<b>${person_info}</b>
 		</div>
 		<en-media style="--en-naturalWidth:${media_width}; --en-naturalHeight:${media_height};"
         			hash="${filehash}"

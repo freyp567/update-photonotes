@@ -15,10 +15,11 @@ import traceback
 from pathlib import Path
 import hashlib
 import csv
+from ratelimit import limits, sleep_and_retry
 
 from .database import PhotoNotesDB, lookup_note
-from .flickr_types import FlickrImage
-from .exceptions import FlickrImageNotFound, NoteNotFound
+from .flickr_types import FlickrPhotoNote
+from .exceptions import PhotoNoteNotFound, NoteNotFound
 from . import utils
 from . import flickr_utils
 
@@ -37,6 +38,11 @@ logger = logging.getLogger('create_note')
 # number of images per page - 500 is maximum allowed
 # use maximum for flickr_api.Photo.search to reduce number of API calls for larger photo streams
 IMAGES_PER_PAGE = 500
+
+
+LIMIT_PHOTOS_INTERVAL = 600  # 10 minutes, in seconds
+LIMIT_PHOTOS_COUNT = 500  # photos per interval 500 per 10 m => 3000 per hour
+# flickr demands to stay under 3600 queries per hour
 
 class NoteCreator:
 
@@ -100,7 +106,8 @@ class NoteCreator:
         license_info = flickr_utils.get_license_info(photo)
         if not license_info:
             logger.info(f"unknown license_id={photo.license!r} for {photo.urls}")
-            license_info = f'License Type {photo.license}'
+            note_tags.add("license-other")
+            license_info = f'unknown License Type {photo.license}'
         elif photo.license != '0':
             note_tags.add("freepic")
             note_tags.add("license-%s" % license_info.replace('CC ', 'CC_').replace(' ', ''))
@@ -261,6 +268,29 @@ class NoteCreator:
             self.params['groups_info'] = 'no groups'
         return
 
+    # throttle API calls to stay below limit of 3600 calls per hhour
+    @limits(calls=LIMIT_PHOTOS_COUNT, period=LIMIT_PHOTOS_INTERVAL)
+    def get_photo_info(self, photo: Photo, pos: int) -> dict:
+        photo_title = photo.title or ''
+        logger.debug(f"{pos} | {photo.id} - {photo_title!r}")
+        photo_description = photo.description or ''
+        photo_description = photo_description.strip().replace('\n', '|')
+
+        uploaded = datetime.datetime.fromtimestamp(int(photo.dateuploaded))
+        image_info = {
+            'pos': pos,
+            'photo_id': photo.id,
+            'photo_title': photo_title,
+            'dateuploaded': uploaded.isoformat()[:10],
+            'description': photo_description[:1000],
+            # additional properties may cost as causing additional api calls (e.g. .license), so omit
+            # 'photo_taken': flickr_utils.get_taken(photo),
+            # 'photo_uploaded': flickr_utils.get_uploaded(photo),
+            # 'license': photo.license,  # expensive, costs an API call
+            # 'lastupdate': flickr_utils.get_lastupdate(photo),
+        }
+        return image_info
+
     def lookup_photo_by_id(self, user: Person, photo_id: str, pageno: Optional[int] = None) -> Optional[Photo]:
         """ lookup photo by id """
         # not always working but slowing down creation, so commented out:
@@ -292,50 +322,46 @@ class NoteCreator:
             "safe_search!": 3,
             # "content_types": 0,  # photos only? mostly photos, so unimportant to restrict
             "per_page": IMAGES_PER_PAGE,
-            "extras": "description,license,date_upload,date_taken,owner_name,last_update",
+            "extras": "title,description,date_upload,date_taken,owner_name,last_update",
         }
         for photo in flickr_api.Walker(
                 flickr_api.Photo.search,
                 **search_params,
         ):
-            # unfortunately cannot pass photo_id, ignored
+            # unfortunately cannot pass photo_id, is ignored / not handled
             pos += 1
             if photo.id == photo_id:
                 logger.info(f"image found for {photo_id} at pos={pos}")
                 return photo
-            photo_title = photo.title
-            logger.debug(f"{pos} | {photo.id} - {photo_title!r}")
+            image_list.append(self.get_photo_info(photo, pos))
 
-            image_list.append({
-                'pos': pos,
-                'photo_id': photo.id,
-                'photo_title': photo_title,
-                # additional properties may cost as causing additional api calls (e.g. .license), so omit
-                # 'photo_taken': flickr_utils.get_taken(photo),
-                # 'photo_uploaded': flickr_utils.get_uploaded(photo),
-                # 'license': photo.license,  # expensive, costs an API call
-                # 'lastupdate': flickr_utils.get_lastupdate(photo),
-            })
+            # if pos > self.options.max_pos:
+            #     # limit to avoid excessive api calls
+            #     logger.warning(f"failed to find image before pos={pos}, stop")
+            #     break
 
-            if pos > self.options.max_pos:
-                # limit to avoid excessive api calls
-                logger.warning(f"failed to find image before pos={pos}, stop")
-                break
+            # we throttle calls to get_photo_info now, so no need have hard limit
+            # but show progress so user may decide if to continue or abort (using keyboard interrupt)
+            if pos % 200 == 0:
+                logger.info(f"scanning pages to find image ... ({pos}) ...")
 
         logger.error(f"image not found for {photo_id} pos={pos}")
 
         # dump image_list for manual inspection
         csv_path = self.import_path / f"{user.id} photos.csv"
-        with csv_path.open(encoding='utf-8-sig', mode='w') as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=image_list[0].keys())
+        csv_fields = ('pos', 'photo_id', 'photo_title', 'dateuploaded')
+        with csv_path.open(encoding='utf-8-sig', newline='', mode='w') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=csv_fields, extrasaction='ignore')
             writer.writerows(image_list)
+        json_path = self.import_path / f"{user.id} photos.json"
+        json_path.write_text(json.dumps(image_list, indent=4, default=str))
         return None
 
     def create_content(self,
                        user: Person,
                        photo: Photo,
                        enex_path: Path,
-                       photo_note: Optional[FlickrImage],
+                       photo_note: Optional[FlickrPhotoNote],
                        ):
         """ generate content for photo found """
 
@@ -547,20 +573,19 @@ class NoteCreator:
         logger.info(f"created note in {enex_path}")
         return not has_error
 
-    def lookup_photonote(self, blog_id: str, photo_id: str) -> Optional[FlickrImage]:
+    def lookup_photonote(self, blog_id: str, photo_id: str) -> Optional[FlickrPhotoNote]:
         image_key = f"{blog_id}|{photo_id}"
         try:
-            found = self.notes_db.flickrimages.lookup_image_by_key(image_key)
-        except FlickrImageNotFound:
-            logger.debug(f"no photo-note / image found for {image_key}")
+            found = self.notes_db.flickrimages.lookup_image(image_key, is_primary=None)
+        except PhotoNoteNotFound:
+            logger.debug(f"no photo-note found for image key={image_key}")
             return None
-        if found:
-            logger.info(f"found photo-note / image for {image_key}")
-            return found
         else:
-            return None
+            logger.info(f"found photo-note / image for {image_key} #={len(found)}")
+            # we potentially get more than one - pick first
+            return found[0]
 
-    def lookup_en_note(self, photo_note: FlickrImage) -> Optional[Note]:
+    def lookup_en_note(self, photo_note: FlickrPhotoNote) -> Optional[Note]:
         """ lookup Evernote note in evernote-backup db """
         try:
             note = lookup_note(self.notes_db.store, photo_note.guid_note)
@@ -569,10 +594,7 @@ class NoteCreator:
         return note
 
     def is_photo_url(self, url):
-        if url.startswith('https://www.flickr.com/photos/'):
-            return True
-        if url.startswith('https://flickr.com/photos/'):
-            return True
+        return flickr_utils.is_flickr_url(url, 'photos/')
         return False
 
     def create_note(self, flickr_url: str) -> bool:
@@ -687,7 +709,7 @@ error details:
 
         self.params.update({
             'blog_id': blog_id,
-            'user_name': user.username,
+            'user_name': utils.quote_xml(user.username),
             'user_location': utils.quote_xml(user_location) or "(no location)",
             'real_name': user_realname,
             'profile_url': user.profileurl,
@@ -705,7 +727,7 @@ error details:
         user_info += f"{user.username} | {blog_id}"
         if user_location:
             user_info += f" || {user_location}"
-        self.params['user_info'] = user_info
+        self.params['user_info'] = utils.quote_xml(user_info)
 
         # lookup photo by id
         photo = self.lookup_photo_by_id(user, photo_id, pageno)
