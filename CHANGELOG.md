@@ -10,7 +10,9 @@
 ## Version History and Changes
 
 ### 0.9.0
-
+#### Improvements
+##### create-note
+- cache photo info to speed up lookup, see CachedLookupPhoto
 
 ### 0.8.3
 

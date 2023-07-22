@@ -93,17 +93,19 @@ def get_uploaded(photo: Photo) -> str:
 
 
 def get_taken(photo: Photo) -> str:
-    photo_taken = photo.taken  # APIcall,
+    if 'datetaken' not in photo.__dict__:
+        return '---'
+    photo_taken = photo.datetaken  # APIcall, unless added 'date_taken' to extras
     if photo_taken and len(photo_taken) > 16:
-        photo_taken = photo_taken[:10]  # reduce precision
+        photo_taken = photo_taken[:16]  # reduce precision
     if photo.takengranularity != 0:
         photo_taken = photo_taken
-    if photo.takenunknown == '0' or photo.takenunknown == 0:  #TODO cleanup
+    if photo.takenunknown == '0':
         photo_taken = photo_taken
     elif photo.takenunknown == '1':
-        photo_taken += ' (unknown)'
+        photo_taken += '?'
     else:
-        photo_taken += f' (unknown-{photo.takenunknown})'
+        photo_taken += f' ?/{photo.takenunknown})'
     return photo_taken
 
 
@@ -179,10 +181,18 @@ class CountingAPIcallsCache(flickr_api.cache.SimpleCache):
         keys.update(self.cache_hit.keys())
         keys = sorted(keys)
         info += "cache hits / misses:\n"
+        not_shown = 0
         for key in keys:
-            info += f"  {key}: "
-            info += f"{self.cache_hit.get(key, 0)} / "
-            info += f"{self.cache_miss.get(key, 0)}\n"
+            cache_misses = self.cache_miss.get(key, 0)
+            if cache_misses > 1:
+                # show only if per api info only if more than 1 miss, to reduce output
+                info += f"  {key}: "
+                info += f"{self.cache_hit.get(key, 0)} / "
+                info += f"{self.cache_miss.get(key, 0)}\n"
+            else:
+                not_shown += 1
+        if not_shown:
+            info += f"({not_shown} API calls with less than 2 hits not shown)\n"
         info += '\n.'
         return info
 
