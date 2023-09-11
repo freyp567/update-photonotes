@@ -1,13 +1,23 @@
 # Changes to update-photonotes
 
 ## TODOs and ideas
-### May 2023
+### September 2023
 - update-db: implement sync/update of photo blogs
-- ensure linking between photo blogs and photo notes
-- refactoring of data model to differentiate images with notes and stacked images
+- verify and improve linking between photo blogs and photo notes
+- refactoring of data model, differentiate images with notes (main image) from stacked images (additional images)
 
 
 ## Version History and Changes
+
+### 0.9.0
+#### Improvements
+##### create-note
+- cache photo info, last 100 images per blog - to detect updates and changes since last visit
+- raise ValueError if unknown license type is found (we know many, but still some undiscovered)
+
+#### Fixes
+##### create-note (for blog site)
+- support also sits without any descripton (seldom, but there are a few)
 
 ### 0.8.3
 

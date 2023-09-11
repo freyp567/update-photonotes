@@ -69,10 +69,11 @@ def get_log_dir():
 
 
 def get_safe_property(obj, name, default=None):
-    missing = object()
-    value = getattr(obj, name, missing)
-    if value is not missing:
-        return value
+    if name in obj.__dict__ or not obj.loaded:
+        missing = object()
+        value = getattr(obj, name, missing)
+        if value is not missing:
+            return value
 
     logger.debug(f"missing property {name!r}")
     return default

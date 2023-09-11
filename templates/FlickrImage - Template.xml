@@ -46,6 +46,7 @@
 		<div>
 			<span style="color:rgb(0, 0, 0);">Uploaded: ${photo_uploaded}</span><br/>
 			<span style="color:rgb(0, 0, 0);">Updated: ${lastupdate}</span>
+			${new_photos}
 		</div>
 		<div>
 			<span style="color:rgb(0, 0, 0);">${license_text}</span>

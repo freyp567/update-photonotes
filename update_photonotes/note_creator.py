@@ -15,18 +15,19 @@ import traceback
 from pathlib import Path
 import hashlib
 import csv
-from ratelimit import limits, sleep_and_retry
+from ratelimit import limits, sleep_and_retry  ### TODO need sleep_and_retry?
 
 from .database import PhotoNotesDB, lookup_note
 from .flickr_types import FlickrPhotoNote
 from .exceptions import PhotoNoteNotFound, NoteNotFound
 from . import utils
 from . import flickr_utils
+from . import cached_lookup
 
 from evernote.edam.type.ttypes import Note
 
 import flickr_api
-from flickr_api.objects import Person, Photo
+from flickr_api.objects import Person, Photo, FlickrList
 import requests
 import requests_cache  # usefulness for flickr API? looks like Flicker prenvents caching
 import fake_useragent
@@ -38,6 +39,7 @@ logger = logging.getLogger('create_note')
 # number of images per page - 500 is maximum allowed
 # use maximum for flickr_api.Photo.search to reduce number of API calls for larger photo streams
 IMAGES_PER_PAGE = 500
+IMAGES_PER_PAGE_FIRST = 100
 
 
 LIMIT_PHOTOS_INTERVAL = 600  # 10 minutes, in seconds
@@ -61,6 +63,15 @@ class NoteCreator:
         else:
             self.base_path = target_dir
         assert self.base_path.is_dir(), "missing directory: {self.base_path"
+
+        if os.getenv("DEBUG") == '1' or os.getenv("LOGLEVEL") == "DEBUG":
+            # for debugging flickr API lookups
+            logging.getLogger('flickr_api.reflection').setLevel('DEBUG')
+
+        # cache photo infos for faster lookup
+        photos_cache_dir = self.base_path / "__cache"
+
+        self._lookup_cache = cached_lookup.CachedLookupPhoto(photos_cache_dir)
 
         template_dir = utils.get_template_dir()
         self.template_file = template_dir / template_name
@@ -108,6 +119,7 @@ class NoteCreator:
             logger.info(f"unknown license_id={photo.license!r} for {photo.urls}")
             note_tags.add("license-other")
             license_info = f'unknown License Type {photo.license}'
+            raise ValueError('TODO examine license type {photo.license}')
         elif photo.license != '0':
             note_tags.add("freepic")
             note_tags.add("license-%s" % license_info.replace('CC ', 'CC_').replace(' ', ''))
@@ -270,7 +282,7 @@ class NoteCreator:
 
     # throttle API calls to stay below limit of 3600 calls per hhour
     @limits(calls=LIMIT_PHOTOS_COUNT, period=LIMIT_PHOTOS_INTERVAL)
-    def get_photo_info(self, photo: Photo, pos: int) -> dict:
+    def get_photo_info(self, photo: Photo, pos: int) -> dict:  ##TODO obsolee?
         photo_title = photo.title or ''
         logger.debug(f"{pos} | {photo.id} - {photo_title!r}")
         photo_description = photo.description or ''
@@ -293,69 +305,16 @@ class NoteCreator:
 
     def lookup_photo_by_id(self, user: Person, photo_id: str, pageno: Optional[int] = None) -> Optional[Photo]:
         """ lookup photo by id """
-        # not always working but slowing down creation, so commented out:
-        # # due to missing (or unknown API) guess from photostreak lookup of image what page it is on
-        # if pageno is None:
-        #     pageno = self.lookup_photo_page(user, photo_id)
-        #     if pageno is not None:
-        #         LOGGER.info(f"located image {photo_id} on page {pageno}")
+        photo = Photo(id=photo_id, owner=user, token=user.getToken())
+        logger.info(f"loaded photo {photo_id} title={photo.title!r}")
 
-        pos = 0
-        if pageno is not None:
-            # note that using pageno is not symmetrical to use of Walker in respect to params passed
-            # check if we can harmonize that, or else check usecase for lookup starting at page (pageno)
-            for photo in user.getPhotos(page=pageno):
-                pos += 1
-                if photo.id == photo_id:
-                    logger.debug(f"found image at pos={pos} on page={pageno}")
-                    return photo
-
-            logger.error(f"image not found for {photo_id} pos={pos} page={pageno}")
-            return None
-
-        logger.warning(f"lookup image {photo_id} in photostream")
-        image_list = []
-        # walk through all images of user to locate it
-        search_params = {
-            "user_id": user.id,
-            "privacy_filter": 1,  # public photos
-            "safe_search!": 3,
-            # "content_types": 0,  # photos only? mostly photos, so unimportant to restrict
-            "per_page": IMAGES_PER_PAGE,
-            "extras": "title,description,date_upload,date_taken,owner_name,last_update",
-        }
-        for photo in flickr_api.Walker(
-                flickr_api.Photo.search,
-                **search_params,
-        ):
-            # unfortunately cannot pass photo_id, is ignored / not handled
-            pos += 1
-            if photo.id == photo_id:
-                logger.info(f"image found for {photo_id} at pos={pos}")
-                return photo
-            image_list.append(self.get_photo_info(photo, pos))
-
-            # if pos > self.options.max_pos:
-            #     # limit to avoid excessive api calls
-            #     logger.warning(f"failed to find image before pos={pos}, stop")
-            #     break
-
-            # we throttle calls to get_photo_info now, so no need have hard limit
-            # but show progress so user may decide if to continue or abort (using keyboard interrupt)
-            if pos % 200 == 0:
-                logger.info(f"scanning pages to find image ... ({pos}) ...")
-
-        logger.error(f"image not found for {photo_id} pos={pos}")
-
-        # dump image_list for manual inspection
-        csv_path = self.import_path / f"{user.id} photos.csv"
-        csv_fields = ('pos', 'photo_id', 'photo_title', 'dateuploaded')
-        with csv_path.open(encoding='utf-8-sig', newline='', mode='w') as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=csv_fields, extrasaction='ignore')
-            writer.writerows(image_list)
-        json_path = self.import_path / f"{user.id} photos.json"
-        json_path.write_text(json.dumps(image_list, indent=4, default=str))
-        return None
+        # EXPERIMENTAL
+        pos, photo_info = self._lookup_cache.lookup_photo(user, photo_id)
+        if photo_info is not None:
+            logger.debug(f"cache lookup succeeded for photo {photo_id}, found at pos {pos}")
+        else:
+            logger.debug(f"cache lookup failed for photo {photo_id}, not found (cache-size={pos})")
+        return photo
 
     def create_content(self,
                        user: Person,
@@ -569,6 +528,7 @@ class NoteCreator:
                 enex = f"<!-- {has_error} -->\n" + enex2.decode('utf-8')
             enex_path.write_text(enex, encoding='utf-8')
 
+        logger.info("")
         logger.info(f"api cache stats:\n{self.api_cache}")
         logger.info(f"created note in {enex_path}")
         return not has_error
@@ -614,7 +574,7 @@ class NoteCreator:
         photo_id = (len(steps) >=6) and steps[5].strip()
         if not photo_id:
             logger.error(f"missing required photo id in URL")
-            raise ValueError("unsupported url {flickr_url!r}")
+            raise ValueError(f"unsupported url {flickr_url!r}")
 
         enex_path = self.import_path / f"{blog_id} {photo_id} .enex"
 
@@ -682,25 +642,69 @@ error details:
         user_data.write_text(json.dumps(user.__dict__, indent=4, default=str), encoding='utf-8')
         # user_data_c = SimpleNamespace(**json.loads(user_data.read_text()))
         photos_count = user.photos_info.get('count') or 'NA'
-        logger.info(f"user for {blog_id} is {user.id} / {user.username!r} - #={photos_count}")
+        logger.info(f"user for {blog_id} is {user.id} / {user.username!r} - #={photos_count}\n")
 
         # summary for user / blog
         now = datetime.date.today().isoformat()
-        photos = user.getPhotos(page=1)
-        if photos:
-            photo = photos[0]
-            last_taken = photo.taken
-            if last_taken:
-                last_taken = str(last_taken)[:10]  # date only
-                if photo.takenunknown == '1':
-                    last_taken = "?" + last_taken
-            else:
-                last_taken = "---"
-            last_upload = datetime.datetime.fromtimestamp(int(photo.dateuploaded)).isoformat()[:10]
-        else:
-            last_taken = '---'
-            last_upload = '---'
+        page = 0
+        per_page = IMAGES_PER_PAGE_FIRST
+        if self._lookup_cache.is_large_site(user):  # use max value for per_page for large site
+            per_page = IMAGES_PER_PAGE
+        photos = user.getPhotos(
+            page=page,
+            safe_search=3,
+            # min_upload_date, max_upload_date,
+            # content_types=[0, 3],
+            extras=['dateuploaded', 'datetaken', 'date_upload', 'date_taken'],
+            per_page=per_page,
+        )
+        if len(photos) == 0:
+            # rare but may happen
+            logger.warning(f"user {user.id} / {user.username!r}  has no (published) photos")
+            empty_path = self.import_path / f"{blog_id} {photo_id} .empty"
+            empty_path.write_text(f"""No photos yet
+            
+flickr_url={flickr_url}
+loaded={now}
+photos_info:
+{json.dumps(user.photos_info, indent=4, default=ascii)}
+.
+""")
+            raise ValueError("missing photos")
 
+        # info on latest photo in blog
+        latest_photo = photos[0]
+        last_taken = flickr_utils.get_taken(latest_photo)
+        last_upload = datetime.datetime.fromtimestamp(int(latest_photo.dateuploaded)).isoformat()[:10]
+
+        for pos, photo in enumerate(photos):
+            attrs = photo.__dict__.keys()
+            # if photo.loaded is False:
+            #     # will triggering load when acceesing attributes
+            #     # photo.loaded = True # flickr_api.flickrerrors.FlickrError: Readonly attribute
+            #     logger.debug(f"#{pos} unloaded Photo id={photo.id} - have {attrs}")
+            dateuploaded = ''
+            if 'dateuploaded' in attrs:
+                dateuploaded = datetime.datetime.fromtimestamp(int(photo.dateuploaded)).isoformat()[0:]
+            else:
+                dateuploaded = '(not loaded/unknown)'
+            logger.debug(f"photo id={photo.id} upload={dateuploaded} title={photo.title!r}")
+
+        # cache latest photos to detect updates
+        new_pos = self._lookup_cache.update_cache(user, photos)
+        if new_pos < 0:
+            if not self._lookup_cache.is_large_site(user):
+                # have more new photos than what cache can hold - increase it
+                self._lookup_cache.drop_cache(user)
+                self._lookup_cache.flag_large_site(user)
+                raise ValueError(f"detected user has more than {per_page} new images - set large site mode")
+            else:
+                logger.warning(f"extra large size with more than 500 additions !!")
+            new_photos = f"+(more than {len(photos)})"
+        else:
+            new_photos = f"+{new_pos}" if new_pos else ""
+
+        # format user info for output
         count_photos = f"{user.photos_info.get('count'):,}".replace(',', '.')
         blog_info = f"{now}: #={count_photos},  t={last_taken},  u={last_upload}"
         date_created = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -716,6 +720,7 @@ error details:
             'blog_info': blog_info,
             'note_created': date_created,
             'note_updated': date_created,
+            'new_photos': new_photos,
             'today': datetime.date.today().isoformat(),
             'timestamp': datetime.datetime.now().isoformat()[:16]
         })
@@ -733,7 +738,7 @@ error details:
         photo = self.lookup_photo_by_id(user, photo_id, pageno)
 
         if photo is None or photo.id != photo_id:
-            logger.error(f"image not found: {blog_id}/{photo_id}")
+            logger.error(f"image not found: {blog_id}/{photo_id}\n")
             logger.info(f"api cache stats:\n{self.api_cache}")
             return False
 
