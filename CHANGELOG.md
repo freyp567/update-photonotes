@@ -9,6 +9,10 @@
 
 ## Version History and Changes
 
+### 0.9.1
+### Maintenance
+- update package versions (lxml -> 4.9.3, reqzest -> 2.31.0, urllib3 -> 2.0.4, ...)
+
 ### 0.9.0
 #### Improvements
 ##### create-note
