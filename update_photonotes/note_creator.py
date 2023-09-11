@@ -119,6 +119,7 @@ class NoteCreator:
             logger.info(f"unknown license_id={photo.license!r} for {photo.urls}")
             note_tags.add("license-other")
             license_info = f'unknown License Type {photo.license}'
+            raise ValueError('TODO examine license type {photo.license}')
         elif photo.license != '0':
             note_tags.add("freepic")
             note_tags.add("license-%s" % license_info.replace('CC ', 'CC_').replace(' ', ''))
@@ -527,6 +528,7 @@ class NoteCreator:
                 enex = f"<!-- {has_error} -->\n" + enex2.decode('utf-8')
             enex_path.write_text(enex, encoding='utf-8')
 
+        logger.info("")
         logger.info(f"api cache stats:\n{self.api_cache}")
         logger.info(f"created note in {enex_path}")
         return not has_error
@@ -572,7 +574,7 @@ class NoteCreator:
         photo_id = (len(steps) >=6) and steps[5].strip()
         if not photo_id:
             logger.error(f"missing required photo id in URL")
-            raise ValueError("unsupported url {flickr_url!r}")
+            raise ValueError(f"unsupported url {flickr_url!r}")
 
         enex_path = self.import_path / f"{blog_id} {photo_id} .enex"
 
@@ -640,18 +642,21 @@ error details:
         user_data.write_text(json.dumps(user.__dict__, indent=4, default=str), encoding='utf-8')
         # user_data_c = SimpleNamespace(**json.loads(user_data.read_text()))
         photos_count = user.photos_info.get('count') or 'NA'
-        logger.info(f"user for {blog_id} is {user.id} / {user.username!r} - #={photos_count}")
+        logger.info(f"user for {blog_id} is {user.id} / {user.username!r} - #={photos_count}\n")
 
         # summary for user / blog
         now = datetime.date.today().isoformat()
         page = 0
+        per_page = IMAGES_PER_PAGE_FIRST
+        if self._lookup_cache.is_large_site(user):  # use max value for per_page for large site
+            per_page = IMAGES_PER_PAGE
         photos = user.getPhotos(
             page=page,
             safe_search=3,
             # min_upload_date, max_upload_date,
             # content_types=[0, 3],
-            extras=['dateuploaded', 'datetaken', 'date_upload', 'date_taken'],   # 'description'
-            per_page=IMAGES_PER_PAGE_FIRST,  # cache latest photos to detect updates
+            extras=['dateuploaded', 'datetaken', 'date_upload', 'date_taken'],
+            per_page=per_page,
         )
         if len(photos) == 0:
             # rare but may happen
@@ -685,10 +690,17 @@ photos_info:
                 dateuploaded = '(not loaded/unknown)'
             logger.debug(f"photo id={photo.id} upload={dateuploaded} title={photo.title!r}")
 
-        # cache users last N photos - allow to detect changes (or see if it is worth to revisit)
+        # cache latest photos to detect updates
         new_pos = self._lookup_cache.update_cache(user, photos)
-        if new_pos is None:
-            new_photos = f"+{len(photos)}+"
+        if new_pos < 0:
+            if not self._lookup_cache.is_large_site(user):
+                # have more new photos than what cache can hold - increase it
+                self._lookup_cache.drop_cache(user)
+                self._lookup_cache.flag_large_site(user)
+                raise ValueError(f"detected user has more than {per_page} new images - set large site mode")
+            else:
+                logger.warning(f"extra large size with more than 500 additions !!")
+            new_photos = f"+(more than {len(photos)})"
         else:
             new_photos = f"+{new_pos}" if new_pos else ""
 
@@ -726,7 +738,7 @@ photos_info:
         photo = self.lookup_photo_by_id(user, photo_id, pageno)
 
         if photo is None or photo.id != photo_id:
-            logger.error(f"image not found: {blog_id}/{photo_id}")
+            logger.error(f"image not found: {blog_id}/{photo_id}\n")
             logger.info(f"api cache stats:\n{self.api_cache}")
             return False
 

@@ -186,7 +186,11 @@ class BlogCreator:
 
             # extract html fragment from body
             html = etree.tostring(body, pretty_print=True).decode('utf-8')
-            fragment = re.search('<body>(.*?)</body>', html, re.DOTALL).group(1)
+            match = re.search('<body>(.*?)</body>', html, re.DOTALL)
+            if match:
+                fragment = match.group(1)
+            else:
+                fragment= "(no description found)"
             user_description = fragment
 
             blog_details = ""  # FUTURE
