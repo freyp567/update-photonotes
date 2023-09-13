@@ -60,14 +60,19 @@ class BlogInfo:
 
     def __init__(self):
         self.note_title = None
+        self.guid_note = None
         self.note_updated = None
+        self.blog_id = None
+        self.user_id = None
         self.blog_latest_update = None
         self.images = []
         self.more_images = []
         self.before_images = []
         self.after_images = []
+        self.text_at_start = []
         self.text_after_images = []
         self.blog_updates = []
+        self.source_url = None
         self.status_xml = []
         self.bloginfo_xml = []
         self.blogdesc_xml = []
@@ -78,6 +83,18 @@ class BlogInfo:
 
     def extract(self, note: Note2) -> bool:
         self.note_title = note.title
+        title2 = note.title.split('|', 1)[1]
+        # avoid troubles with exotic user names, e.g. 'P@tH Im@ges | 137473925@N08 | Flickr blog'
+        user_id = [ info for info in title2.split('|') if '@' in info ]
+        if len(user_id) == 0:
+            self.user_id = None
+        elif len(user_id) == 1:
+            self.user_id = user_id[0]
+        else:
+            logger.error(f"unable to determine userid from title {note.title}")
+            raise ValueError("failed to determine user id from note title")
+        self.guid_note = note.en_note.guid
+        self.note_tags = note.en_note.tagNames
         logger.debug(f"updating blog note {self.note_title!r} ...")
         content = get_note_content(note.en_note.content)
         root = etree.fromstring(content)
@@ -86,8 +103,8 @@ class BlogInfo:
         except ValueError as exc:
             logger.error(f"failed to extract blog info from {note.title!r}:\n  {exc}")
             return False
-        except Exception:
-            logger.exception(f"failed to extract blog info from {note.title!r}")
+        except Exception as exc:
+            logger.exception(f"failed to extract blog info from {note.title!r} - {exc}")
             return False
 
     def _extract_isodate(self, node: etree.Element) -> datetime:
@@ -133,7 +150,8 @@ class BlogInfo:
 
     def _extract_images(self, node: etree.Element) -> None:
         if node.tag != 'ul':
-            raise ValueError("expect list of images")
+            # old style image list (using sequence of divs => manual fixup
+            raise ValueError(f"expect list of images, got {node.tag}")
         for item in node.getchildren():
             assert item.tag == 'li'
             info = item.getchildren()
@@ -144,13 +162,19 @@ class BlogInfo:
 
     def _extract_moreimage(self, node: etree.Element) -> dict:
         image_info = {
-            'text_before': [],
-            'text_after': []
+            'before': [],
+            'after': []
         }
         assert node.tag == 'div'
         pos = 'before'
         prefix = (node.text or '').strip()
         if prefix.startswith('see:'):
+            prefix = prefix[5:].strip()
+        elif prefix.startswith('see.'):
+            # typing dot instead of colon is common mistake, accept it
+            prefix = prefix[5:].strip()
+        elif prefix.startswith('see\xa0'):
+            # dito cases without colon and dot
             prefix = prefix[5:].strip()
         elif prefix:
             # old style blog notes may come without see: prefix
@@ -163,12 +187,19 @@ class BlogInfo:
                 return None
             if prefix.startswith('scan '):
                 return None
+            if prefix.startswith('album '):
+                return None
+            if prefix.startswith('https://'):
+                return None
             if self._extract_isodate_text_cond(prefix[:10]):
                 # at start of section with blog updates, no section 'more images'
                 return None
-            logger.info(f"accept non-std prefix in more images section: {prefix!r}")
+
+            # everything else to finish the more images section
+            logger.debug(f"detected non-std prefix in more images section: {prefix!r}")
+            return None
         if prefix:
-            image_info['text_before'].append(prefix)
+            image_info['before'].append(prefix)
 
         for subnode in node.getchildren():
             if subnode.tag == 'a':
@@ -181,14 +212,22 @@ class BlogInfo:
                 if pos == 'before' and text.startswith('see:'):
                     text = text[5:].strip()
                 else:
+                    # old style, missing see: prefix
                     text = text.strip()
-                image_info[f"text_{pos}"].append(text)
+                image_info[pos].append(text)
+            elif subnode.tag == 'b':
+                image_info[pos].append(self._extract_xml(subnode))
             else:
-                subnode = subnode
+                raise ValueError(f'troubles with moreimages handling, element {subnode.tag}')
 
         if 'href' not in image_info:
-            # not a more image info
-            return None
+            if 'before' in image_info:
+                # image info without link
+                logger.warning(f"missing link for image {image_info['before']}")
+                image_info['href'] = None
+            else:
+                # not an image item
+                return None
         return image_info
 
     def _extract_node_text(self, node: etree.Element):
@@ -209,14 +248,17 @@ class BlogInfo:
         if 'rev' in keys:
             assert node.attrib['rev'] == 'en_rl_none'
             keys.discard('rev')
+        if 'shape' in keys:
+            assert node.attrib['shape'] == 'rect'
+            keys.discard('shape')
         # all consumed?
         assert not keys, f"unhandled image anchor attrib: {keys}"
         return image_info
 
     def _extract_image_info(self, node: etree.Element) -> dict:
         image_info = {
-            'text_before': [],
-            'text_after': []
+            'before': [],
+            'after': []
         }
         assert node.tag == 'div'
         pos = 'before'
@@ -231,7 +273,8 @@ class BlogInfo:
                     # expect image id after link
                     assert len(subnode.getchildren()) == 0
                     image_id = subnode.text.strip()
-                    assert image_id.isdigit(), f"invalid image_id: {image_id}"
+                    if not image_id.isdigit():
+                        logger.error(f"invalid image_id: {image_id!r}")
                     assert 'image_id' not in image_info, "single image_id only"
                     image_info['image_id'] = image_id
                     continue
@@ -239,9 +282,13 @@ class BlogInfo:
                 # text = " ".join(etree.XPath("./text()")(subnode))
                 # passthrough text before / after link
                 image_info[pos].append(etree.tostring(subnode))
+            elif subnode.tag == 'b':
+                image_info[pos].append(etree.tostring(subnode))
+            elif subnode.tag == 'br':
+                # empty list item (does happen)
+                continue
             else:
-                assert False
-                node = node
+                raise ValueError(f"unhandled element {subnode.tag}")
         return image_info
 
     def _extract_blog_updates(self, node: etree.Element) -> bool:
@@ -314,198 +361,247 @@ class BlogInfo:
 
     def _extract_blog_info(self, root: etree.Element) -> bool:
         """ extract information from content of a blog note """
-        section = "start"
-        context = etree.iterwalk(root, events=('start', 'end'))
-        for action, node in context:
+        section = 'start'
+        album_info_old = None
+        for node in root.getchildren():
             if node == root:
                 continue
 
-            if action == 'start':
-                if node.getparent() == root:
-                    # toplevel node
-                    if node.tag == 'div' and self._is_empty(node):
-                        # ignore empty divs, they are for readability only
-                        context.skip_subtree()
-                        continue
+            if node.tag == 'div' and self._is_empty(node):
+                # ignore empty divs, they are for readability only
+                continue
 
-                    # first item we expect is the date of last update
-                    if self.note_updated is None:
-                        assert node.tag == "div", "expect first div to hold date of last update"
-                        self.note_updated = self._extract_isodate(node)
-                        continue
+            # first item we expect is the date of last update
+            if self.note_updated is None:
+                assert node.tag == "div", "expect first div to hold date of last update"
+                self.note_updated = self._extract_isodate(node)
+                continue
 
-                    if self._is_marker(node, 'images:'):
-                        assert section == 'start', f"images in mode {section}"
-                        section = 'images'
-                        context.skip_subtree()
-                        continue
+            if self._is_marker(node, 'images:'):
+                assert section == 'start', f"images in mode {section}"
+                section = 'images'
+                continue
 
-                    if self._is_marker(node, 'more images:'):
-                        # ignore prefix of section with additional images
-                        assert section == 'moreimages', f"more images in mode {section}"
-                        section = 'moreimages'
-                        context.skip_subtree()
-                        continue
+            if self._is_marker(node, 'more images:'):
+                # ignore prefix of section with additional images
+                if section == 'start':
+                    logger.warning(f"no images in blog note {self.note_title!r}")
+                    # happens, sometimes
+                elif section != 'moreimages':
+                    raise ValueError(f"more images in mode {section}")
+                section = 'moreimages'
+                continue
 
-                    if section == 'start':
-                        # maybe to be supported, but skip for now
-                        raise ValueError("unexpected text in start section")
+            if section == 'start':
+                # text before images section
+                xml = self._extract_xml(node)
+                if node.tag == 'div':
+                    self.text_at_start.append(xml)
+                    continue
+                else: # e.g. ul,
+                    raise ValueError("unexpected text in start section")
 
-                    if section == 'images':
-                        self._extract_images(node)
-                        context.skip_subtree()
-                        logger.info(f"{len(self.images)} images in {self.note_title}")
-                        section = 'moreimages'
-                        continue
+            if section == 'images':
+                self._extract_images(node)
+                logger.info(f"{len(self.images)} images in {self.note_title}")
+                section = 'moreimages'
+                continue
 
-                    if section == 'moreimages':
-                        # section is optional, may be skipped
-                        image_info = self._extract_moreimage(node)
-                        if image_info is None:
-                            section = 'afterimages'
-                            # fall through to next section, no continue here
-                        else:
-                            self.more_images.append(image_info)
-                            context.skip_subtree()
-                            continue
-
-                    if section == 'afterimages':
-                        if node.tag == 'div':
-                            updated = self._extract_blog_updates(node)
-                            if updated is not None:
-                                if not self.blog_latest_update:
-                                    self.blog_latest_update = updated
-                                    # TODO verify blog_update and blog_latst_update, should match - normally
-                                continue
-                            else:
-                                # text after image / more image section
-                                text_after = self._extract_xml(node)
-                                self.text_after_images.append(text_after)
-                                context.skip_subtree()
-                                continue
-                        elif node.tag == 'hr':
-                            section = 'status'
-                            continue
-
-                    if section == 'status':
-                        if node.tag == 'div':
-                            self.status_xml.append(self._extract_xml(node))
-                            context.skip_subtree()
-                            continue
-                        elif node.tag == 'hr':
-                            section = 'bloginfo'
-                            continue
-
-                    if section == 'bloginfo':
-                        if node.tag == 'div':
-                            self.bloginfo_xml.append(self._extract_xml(node))
-                            context.skip_subtree()
-                            continue
-                        elif node.tag == 'en-media':
-                            self.bloginfo_xml.append(self._extract_xml(node))
-                            context.skip_subtree()
-                            continue
-                        elif node.tag == 'hr':
-                            section = 'blogdesc'
-                            continue
-
-                    if section == 'blogdesc':
-                        if node.tag == 'div':
-                            self.blogdesc_xml.append(self._extract_xml(node))
-                            context.skip_subtree()
-                            continue
-                        elif node.tag == 'hr':
-                            # sometimes, there may be more than one <hr> in the description section
-                            if node.getnext().tag == 'ul':
-                                # detected blog properties list, so end of description
-                                section = 'blogprops'
-                                continue
-                            else:
-                                # eliminate empty div
-                                if etree.tostring(node.getnext()) != b'<div><br/></div>':
-                                    self.blogdesc_xml.append(self._extract_xml(node))
-                                continue
-
-                    if section == 'blogprops':
-                        if node.tag == 'ul':
-                            self._extract_blogprops(node)
-                            context.skip_subtree()
-                            continue
-                        elif node.tag == 'hr':
-                            section = 'albums'
-                            continue
-
-                    if section == 'albums':
-                        if node.tag == 'div':
-                            node_text = self._extract_node_text(node)
-                            context.skip_subtree()
-                            if node_text.startswith("Albums"):
-                                continue
-                            node_text = node_text
-                        elif node.tag == 'ul':
-                            self._extract_albums(node)
-                            context.skip_subtree()
-                            continue
-                        elif node.tag == 'hr':
-                            section = 'galleries'
-                            continue
-
-                    if section == 'galleries':
-                        # note this section is optional
-                        if node.tag == 'div':
-                            context.skip_subtree()
-                            node_text = self._extract_node_text(node)
-                            if node_text.startswith("Galleries"):
-                                continue
-                            elif node_text.startswith('No galleries'):
-                                self.galleries = None
-                                section = 'theend'
-                                continue
-                            else:
-                                section = 'theend'
-                        elif node.tag == 'ul':
-                            self._extract_galleries(node)
-                            context.skip_subtree()
-                            continue
-                        elif node.tag == 'hr':
-                            section = 'theend'
-                            context.skip_subtree()
-                            continue
-
-                    if section == 'theend':
-                        if node.tag == 'div':
-                            context.skip_subtree()
-                            # expect timestamp, date and time note last updated
-                            node_text = self._extract_node_text(node)
-                            if node_text.startswith('Galleries'):
-                                # for a yet unknown reason lxml repeats section # HACK
-                                assert len(self.galleries) > 0 or self.galleries is None
-                                continue
-                            if node_text == '.':
-                                continue
-                            self.timestamp = self._extract_timestamp(node_text)
-                            if self.timestamp:
-                                continue
-                            section = 'afterend'
-                        elif node.tag == 'ul':
-                            # for a yet unknown reason lxml repeats section - see note above
-                            assert len(self.galleries) > 0 or self.galleries is None
-                            context.skip_subtree()
-                            continue
-
-                    if section is 'afterend':
-                        xml = self._extract_xml(node)
-                        raise ValueError(f'unexpected text at end: {xml}')
-
-                    xml = self._extract_xml(node)
-                    # this can happen for old-style blog notes, with list of albums not formatted as list
-                    raise ValueError(f"detected unhandled toplevel element in {section}: {xml}")
+            if section == 'moreimages':
+                # section is optional, may be skipped
+                image_info = self._extract_moreimage(node)
+                if image_info is None:
+                    section = 'afterimages'
+                    # fall through to next section, no continue here
                 else:
-                    xml = self._extract_xml(node)
-                    raise ValueError(f"detected unhandled element in {section} on sublevel; {xml}")
+                    self.more_images.append(image_info)
+                    continue
 
-            else:
-                assert action == 'end'
+            if section == 'afterimages':
+                if node.tag == 'div':
+                    updated = self._extract_blog_updates(node)
+                    if updated is not None:
+                        if not self.blog_latest_update:
+                            self.blog_latest_update = updated
+                        continue
+                    else:
+                        # text after image / more image section
+                        text_after = self._extract_xml(node)
+                        if text_after == '<div>...</div>':
+                            pass
+                        else:
+                            self.text_after_images.append(text_after)
+                        continue
+                #elif node.tag == 'ul':
+                #    self.text_after_images.append(self._extract_xml(node))
+                elif node.tag == 'hr':
+                    section = 'status'
+                    continue
+
+            if section == 'status':
+                if node.tag == 'div':
+                    div_text = self._extract_node_text(node)
+                    src_link = [el for el in node.getchildren() if el.tag == 'a']
+                    if src_link:
+                        # Clip-Quelle for old style note, ...
+                        src_link = src_link[0]
+                        self.source_url = src_link.attrib['href']
+                    self.status_xml.append(self._extract_xml(node))
+                    continue
+                elif node.tag == 'hr':
+                    section = 'bloginfo'
+                    continue
+
+            if section == 'bloginfo':
+                if node.tag == 'div':
+                    blog_link = [el for el in node.getchildren() if el.tag == 'a']
+                    if blog_link:
+                        blog_link = blog_link[0]
+                        blog_url = blog_link.attrib['href']
+                        logger.debug(f"blog url is {blog_url}")
+                        if not blog_url.startswith('https://www.flickr.com/'):
+                            # e.g. http://www.facebook.com/pages/Soul-of-Snowdonia-Photographic-Gal
+                            raise ValueError(f"bad blog url: {blog_url}")
+                        parts = blog_url.split('/people/')
+                        if len(parts) != 1:
+                            self.blog_id = parts[1].split('/')[0]
+                        else:
+                            # somethines we have not blog url but url of photostream
+                            parts = blog_url.split('/photos/')
+                            if len(parts) != 2:
+                                raise ValueError("expect flickr url to blog or photo stream")
+                            self.blog_id = parts[1].split('/')[0]
+
+                    self.bloginfo_xml.append(self._extract_xml(node))
+                    continue
+                elif node.tag == 'en-media':
+                    self.bloginfo_xml.append(self._extract_xml(node))
+                    continue
+                elif node.tag == 'hr':
+                    section = 'blogdesc'
+                    if not self.blog_id:
+                        logger.error(f"could not determine blog id from note")
+                    continue
+
+            if section == 'blogdesc':
+                if node.tag in ('div', 'h4', 'ul', 'ol'):
+                    self.blogdesc_xml.append(self._extract_xml(node))
+                    continue
+                elif node.tag == 'hr':
+                    # sometimes, there may be more than one <hr> in the description section
+                    if node.getnext().tag == 'ul':
+                        # detected blog properties list, so end of description
+                        section = 'blogprops'
+                        continue
+                    else:
+                        # eliminate empty div
+                        if etree.tostring(node.getnext()) != b'<div><br/></div>':
+                            self.blogdesc_xml.append(self._extract_xml(node))
+                        continue
+
+            if section == 'blogprops':
+                if node.tag == 'ul':
+                    self._extract_blogprops(node)
+                    continue
+                elif node.tag == 'hr':
+                    section = 'albums'
+                    continue
+
+            if section == 'albums':
+                if node.tag == 'div':
+                    node_text = self._extract_node_text(node)
+                    if node_text.startswith("Albums"):
+                        continue
+                    if node_text == 'No albums':
+                        self.albums = None
+                        section = 'galleries'
+                        continue
+
+                    # assumedly an old style album list
+                    section = 'albumsold'
+
+                elif node.tag == 'ul':
+                    self._extract_albums(node)
+                    continue
+                elif node.tag == 'hr':
+                    section = 'galleries'
+                    continue
+
+            if section == 'albumsold':
+                if node.tag == 'div':
+                    div_text = self._extract_node_text(node)
+                    if div_text == '':
+                        album_info_old = None
+                        continue  # skip empty lines
+
+                    if ' views' in div_text:  # photos, videos, ...
+                        assert album_info_old is not None
+                        self.albums.append(f"{album_info_old} | {div_text}")
+                        album_info_old = None
+                        continue
+
+                    if div_text not in ('.', ):
+                        logger.warning(f"ignored text in old album section: {div_text!r}")
+                    continue
+
+                elif node.tag in ('h4',):
+                    div_text = self._extract_node_text(node)
+                    assert album_info_old is None, f"troubles extracting album info (old style), " \
+                                                   f"see {album_info_old} | {div_text}"
+                    album_info_old = div_text
+                    continue
+
+                elif node.tag == 'hr':
+                    section = 'galleries'
+                    continue
+                else:
+                    assert False
+
+            if section == 'galleries':
+                # note this section is optional
+                if node.tag == 'div':
+                    node_text = self._extract_node_text(node)
+                    if node_text.startswith("Galleries"):
+                        continue
+                    elif node_text.startswith('No galleries'):
+                        self.galleries = None
+                        section = 'theend'
+                        continue
+                    else:
+                        section = 'theend'
+                elif node.tag == 'ul':
+                    self._extract_galleries(node)
+                    continue
+                elif node.tag == 'hr':
+                    section = 'theend'
+                    continue
+
+            if section == 'theend':
+                if node.tag == 'div':
+                    # expect timestamp, date and time note last updated
+                    node_text = self._extract_node_text(node)
+                    if node_text.startswith('Galleries'):
+                        # for a yet unknown reason lxml repeats section # HACK
+                        #assert len(self.galleries) > 0 or self.galleries is None
+                        raise ValueError(f"troubles with galleries extraction")
+                    if node_text == '.':
+                        continue
+                    self.timestamp = self._extract_timestamp(node_text)
+                    if self.timestamp:
+                        continue
+                    section = 'afterend'
+                elif node.tag == 'ul':
+                    # for a yet unknown reason lxml repeats section - see note above (issue with iterwalk??)
+                    assert len(self.galleries) > 0 or self.galleries is None
+                    continue
+
+            if section is 'afterend':
+                xml = self._extract_xml(node)
+                raise ValueError(f'unexpected text at end: {xml}')
+
+            xml = self._extract_xml(node)
+            # this can happen for old-style blog notes, with list of albums not formatted as list
+            raise ValueError(f"detected unhandled element in {section}:\n  {xml}")
 
         return True
 
@@ -513,27 +609,7 @@ class BlogInfo:
         """ generate html content for a blog note """
         return None  # TODO future
 
-"""
-old code, to be dropped:
 
-            # for anchor in xml.xpath('//a'):
-            #     href = anchor.attrib.get("href")
-            #     if 'evernote:///view/' in href:
-            #         # TODO test if image link
-            #         internal.append(href[17:])
-            #         continue
-            #     if 'flickr.com' not in href:
-            #         continue
-            #     if href.startswith(FLICKR_PHOTO_URL):
-            #         # 'href': 'https://www.flickr.com/photos/27297062@N02/51089206529/in/pool-inexplore/',
-            #         # ..., 'rev': 'en_rl_none', 'target': '_blank'}
-            #         self._handle_image_link(blog_note, href)
-            #     else:
-            #         logger.debug(f"ignored href={href!r}")
-            #
-            # # 'www.flickr.com/people/'
-            # if 'www.flickr.com/photos' not in content_text:
-            #     return None
-
-
-"""
+# TODO
+# Alan Cressler | alan_cressler | 7449293@N02 | Flickr blog
+# fails to dected timestamp at end

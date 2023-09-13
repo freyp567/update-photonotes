@@ -79,13 +79,10 @@ class NotesUpdater:
         logger.info(f"updated notebook: {processed} ")
         return
 
-    def _update_blog(self, blog_note: Note2) -> str:
+    def _update_blog(self, blog: BlogInfo) -> str:
         """ update content of blog note - rturns updated note or None if no update requireed """
         try:
-            blog = BlogInfo()
-            if not blog.extract(blog_note):
-                # unable to extract blog info
-                return None
+            # TODO verify blog_update and blog_latst_update, should match - normally
 
             # check and update the blog info
             if blog.timestamp:
@@ -613,7 +610,7 @@ found see:
             note2 = Note2(note)
 
             if not note.tagNames:
-                logger.warning(f'ignore note {self.pos} without tags: {note2}')
+                logger.warning(f'ignore note {self.pos} without tags: {note2.title!r}')
                 continue  # ignore notes without tags
 
             if 'inaccessible' in note.tagNames:  ##TODO make configurable
@@ -655,11 +652,24 @@ found see:
         return
 
     def _update_flickr_blog(self, note: Note2, export_enex: bool):
-        """ analyze and uodate blog note """
+        """ analyze and update blog note """
         # TODO use throttling, ensuring no more than (.limit) notes per (interval)
 
+        blog = BlogInfo()
+        if not blog.extract(note):
+            logger.debug(f"blog info extraction from note incomplete")
+
+        # use FlickrPhotoBlog?
+        if blog.blog_id is not None:
+            # update record in database if blog could be identified
+            self.notes_db.flickrblogs.update_blog(blog)
+
+        if blog.timestamp is None:
+            # extraction of blog info not fully successfull - old style or incomplete
+            return
+
         # update note content
-        note_content = self._update_blog(note)
+        note_content = self._update_blog(blog)
         if note_content is None:
             # no update or unable to update
             return
@@ -759,7 +769,7 @@ found see:
                 stacked_link = pnote_info['all'][image_key]
                 self.notes_db.flickrimages.update_image(
                     pnote_info['photo_note'], stacked_link,
-                    is_primary = False,
+                    is_primary=False,
                     log_changes=debug
                 )
 

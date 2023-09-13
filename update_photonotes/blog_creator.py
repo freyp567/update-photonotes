@@ -27,11 +27,14 @@ import hashlib
 from lxml import etree
 
 # from flickr_types import FlickrImage  # FUTURE, to lookup photo notes
-from .database import PhotoNotesDB
+from .database import PhotoNotesDB, lookup_note
 from . import utils
+from .note_utils import Note2
+from .blog_info import BlogInfo
 
 import flickr_api
 from flickr_api.objects import Photo, Person
+from .flickr_types import FlickrPhotoBlog
 from . import flickr_utils
 
 import requests
@@ -95,6 +98,7 @@ class BlogCreator:
         flickr_api.enable_cache(
             self.api_cache
         )
+        # main entry: see create_note
 
     def get_recent_photo(self, user: Person) -> tuple:
         photo = user.getPhotos(page=1)[0]
@@ -274,6 +278,18 @@ class BlogCreator:
             self.params['albums_list'] = "<div><span>No albums</span></div>"
         return
 
+    def lookup_blognote(self, blog_id: str) -> FlickrPhotoBlog|None:  ## TODO BlogNote
+        blog_key = f"{blog_id}"
+        try:
+            found = self.notes_db.flickrblogs.lookup_blog_by_id(blog_key)
+        except ValueError as exc:   #PhotoBlogNotFound:
+            logger.info(f"no blog-note found for key={blog_key}")
+            return None
+        else:
+            logger.info(f"found blog-note for {blog_key}")
+            return found
+
+
     def create_note(self, flickr_url: str) -> bool:
         logger.info(f"create blognote for {flickr_url}")
         assert flickr_url.startswith('https://www.flickr.com/people/'), "must have a Flickr URL to a blog entry"
@@ -294,6 +310,17 @@ class BlogCreator:
         user = flickr_api.Person.findByUrl(flickr_url)
         if not user:
             raise ValueError(f"user not found by url={flickr_url}")
+
+        # lookup blog note in photonotes db
+        blog_note = self.lookup_blognote(blog_id)  # vs blog_id
+        if blog_note is not None:
+            note = lookup_note(self.notes_db.store, blog_note.guid_note)
+            blog = BlogInfo()
+            blog_ok = blog.extract(Note2(note))
+            have_blog_info = True
+            # TODO update blog object and flickrblog entry in db
+        else:
+            have_blog_info = False
 
         user_data.write_text(json.dumps(user.__dict__, indent=4, default=str), encoding='utf-8')
         # user_info = SimpleNamespace(**json.loads(user_data.read_text()))

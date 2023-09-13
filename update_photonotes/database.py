@@ -20,6 +20,7 @@ logger = logging.getLogger('updater.database')
 DB_SCHEMA_PN = """\
 CREATE TABLE IF NOT EXISTS flickr_blog(
     blog_id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT,
     guid_note TEXT,  -- guid of photo note, or NULL
     note_tags, -- note tags; list joined by '|';  note: '||' if no tags
     entry_updated TEXT, -- ISO8601 string (date only); date db record got last updated / verified
@@ -32,6 +33,9 @@ CREATE TABLE IF NOT EXISTS flickr_blog(
 
 CREATE INDEX IF NOT EXISTS idx_blog
   ON flickr_blog(blog_id);
+
+CREATE INDEX IF NOT EXISTS idx_userid
+  ON flickr_blog(user_id);
 
 
 CREATE TABLE IF NOT EXISTS flickr_image(
@@ -113,7 +117,7 @@ class FlickrBlogStorage(SqliteStorage):
         blog.favorite = row["favorite"]
         blog.image_count = row["image_count"]
         blog.entry_updated = FlickrDate(row["entry_updated"])
-        blog.verified = FlickrDate(row["verified"])
+        # blog.verified = FlickrDate(row["verified"])  # future
         return blog
 
     def lookup_blog_by_note(self, guid_note):
@@ -141,6 +145,31 @@ class FlickrBlogStorage(SqliteStorage):
 
             blog = self._create_blog(row)
             return blog
+
+    def update_blog(self, blog_info):
+        """ create or update blog entry in database """
+
+        values = {
+            'entry_updated': FlickrDate.today().serialize(),
+            'blog_id': blog_info.blog_id,
+            # TODO !user_id!: blog_info.user_id,
+            'guid_note': blog_info.guid_note,
+            'note_tags': '|%s|' % '|'.join(blog_info.note_tags),
+            #'date_verified': blog_info.date_verified.serialize(), # TODO set when update from flickr - FUTURE
+            # TODO additional info from blog_info we need to search fore
+        }
+        dbkeys = list(values.keys())
+        dbvalues = []
+        for key in dbkeys:
+            dbvalues.append(values[key])
+
+        markers = ('?, '*len(dbkeys))[:-2]
+        with self.db as con:
+            con.execute(
+                "replace into flickr_blog(%s) values (%s)" % (', '.join(dbkeys), markers),
+                tuple(dbvalues),
+            )
+        return
 
 
 class FlickrImageStorage(SqliteStorage):
