@@ -152,12 +152,13 @@ class FlickrBlogStorage(SqliteStorage):
         values = {
             'entry_updated': FlickrDate.today().serialize(),
             'blog_id': blog_info.blog_id,
-            # TODO !user_id!: blog_info.user_id,
+            # !user_id!: blog_info.user_id,  # TODO extend database definition first
             'guid_note': blog_info.guid_note,
             'note_tags': '|%s|' % '|'.join(blog_info.note_tags),
-            #'date_verified': blog_info.date_verified.serialize(), # TODO set when update from flickr - FUTURE
             # TODO additional info from blog_info we need to search fore
         }
+        if blog_info.date_verified:
+            values['date_verified'] = blog_info.date_verified.serialize()
         dbkeys = list(values.keys())
         dbvalues = []
         for key in dbkeys:

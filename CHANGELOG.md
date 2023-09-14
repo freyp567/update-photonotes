@@ -11,7 +11,14 @@
 
 ### 0.9.1
 ### Maintenance
-- update package versions (lxml -> 4.9.3, reqzest -> 2.31.0, urllib3 -> 2.0.4, ...)
+- update package versions (lxml -> 4.9.3, request -> 2.31.0, urllib3 -> 2.0.4, ...)
+
+#### Improvements
+##### create-note
+- for blog notes, update albums (photosets) info from current note
+
+##### update-db
+- create and update flickr-blog for blog notes
 
 ### 0.9.0
 #### Improvements

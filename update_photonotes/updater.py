@@ -18,7 +18,7 @@ from evernote.edam.type.ttypes import Note
 from .blog_info import BlogInfo
 from .flickr_utils import is_flickr_url
 from .conversion import get_note_content
-from .flickr_types import FlickrPhotoNote, FlickrDate
+from .flickr_types import FlickrPhotoNote, FlickrDate   # FlickrPhotoBlog
 from .database import PhotoNotesDB, lookup_note
 from .exceptions import NoteNotFound,  PhotoNoteNotFound
 from .note_utils import Note2

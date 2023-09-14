@@ -52,8 +52,8 @@ from .note_utils import Note2
 from .conversion import get_note_content
 
 import logging
-logger = logging.getLogger('app.blog_info')
 
+logger = logging.getLogger('app.blog_info')
 
 
 class BlogInfo:
@@ -64,6 +64,7 @@ class BlogInfo:
         self.note_updated = None
         self.blog_id = None
         self.user_id = None
+        self.date_verified = None  # note: set from database / flickrblog entity, but kept as marker
         self.blog_latest_update = None
         self.images = []
         self.more_images = []
@@ -77,7 +78,7 @@ class BlogInfo:
         self.bloginfo_xml = []
         self.blogdesc_xml = []
         self.properties = []
-        self.albums = []
+        self.albums = []  # flickr photosets
         self.galleries = []
         self.timestamp = None
 
@@ -85,7 +86,7 @@ class BlogInfo:
         self.note_title = note.title
         title2 = note.title.split('|', 1)[1]
         # avoid troubles with exotic user names, e.g. 'P@tH Im@ges | 137473925@N08 | Flickr blog'
-        user_id = [ info for info in title2.split('|') if '@' in info ]
+        user_id = [info for info in title2.split('|') if '@' in info]
         if len(user_id) == 0:
             self.user_id = None
         elif len(user_id) == 1:
@@ -120,16 +121,14 @@ class BlogInfo:
     def _extract_isodate_text(self, value: str) -> datetime:
         return datetime.strptime(value, "%Y-%m-%d")
 
-    def _extract_isodate_text_cond(self, value: str) -> datetime|None:
+    def _extract_isodate_text_cond(self, value: str) -> datetime | None:
         try:
             return datetime.strptime(value, "%Y-%m-%d")
         except ValueError:
             return None
 
-
-
     def _is_empty(self, node: etree.Element) -> bool:
-        subitems = [n for n in node.getchildren() if n.tag not in ('br', )]
+        subitems = [n for n in node.getchildren() if n.tag not in ('br',)]
         if subitems:
             # there are child elements, so not empty
             return False
@@ -139,9 +138,8 @@ class BlogInfo:
         text = text.strip()
         return not text
 
-
     def _is_marker(self, node: etree.Element, info: str) -> bool:
-        subitems = [n for n in node.getchildren() if n.tag not in ('br', )]
+        subitems = [n for n in node.getchildren() if n.tag not in ('br',)]
         if subitems:
             return False
         text = " ".join(etree.XPath("./text()")(node))
@@ -320,7 +318,6 @@ class BlogInfo:
         assert node.tag == 'ul'
         for subnode in node.getchildren():
             assert subnode.tag == 'li'
-            album_info = {}
             info = self._extract_node_text(subnode)
             # split into parts
             # e.g. 'Blumen Flower | #=379 u=2023-04-22'
@@ -328,26 +325,20 @@ class BlogInfo:
             if len(props) < 2:
                 raise ValueError(f"cannot interpret album info: {info!r}")
             elif len(props) > 2:
-                album_info['title'] = '|'.join(props[:-1])
-                props = props[-1].strip()
-            else:
-                album_info['title'] = props[0]
+                album_title = '|'.join(props[:-1])
+                extras = '|'.join(props[2:])
                 props = props[1].strip()
+            else:
+                album_title = props[0]
+                props = props[1].strip()
+                extras = ''
 
-            if not props.startswith('#'):
-                raise ValueError(f"format error in album info: {info!r}")
+            album_info = self._extract_album_item_info(props)
+            album_info['title'] = album_title
+            if extras:
+                album_info['extras'] = extras
+            self.albums.append(album_info)
 
-            for prop_item in props[1].strip().split(' '):
-                key, value = prop_item.split('=')
-                if key in ('u', ):
-                    value = self._extract_isodate_text(value)
-                    value = value.date()
-                elif key == '#':
-                    value = int(value)
-                else:
-                    value = value
-                album_info[key] = value
-            self.albums.append(info)
         return
 
     def _extract_galleries(self, node: etree.Element) -> None:
@@ -359,13 +350,58 @@ class BlogInfo:
             self.galleries.append(info)
         return
 
+    def _extract_album_item_info(self, value: str) -> dict:
+        info = {}
+        if not value.startswith('#'):
+            raise ValueError(f"format error in album info: {info!r}")
+
+        for prop_item in value.strip().split(' '):
+            key, value = prop_item.split('=')
+            if key in ('u',):
+                value = self._extract_isodate_text(value)
+                value = value.date()
+            elif key == '#':
+                value = int(value)
+            else:
+                value = value
+            info[key] = value
+
+        return info
+
+    def _extract_albumold_item_info(self, value: str) -> dict:
+        info = {}
+        keywords = [
+            ('photos', '#'),
+            ('photo', '#'),
+            ('videos', 'm'),
+            ('video', 'm'),
+            ('views', 'v'),
+            ('view', 'v'),
+        ]
+        value = value.replace('\xb7', ' ')
+        for keyword, key in keywords:
+            if keyword in value:
+                parts = value.split(keyword)
+                assert len(parts) == 2
+                part0 = parts[0].strip()
+                pos = len(part0)
+                while pos > 0 and part0[pos-1:].isdigit():
+                    pos -= 1
+                info[key] = int(part0[pos:])
+                part0 = part0[:pos]
+                value = f"{part0} {parts[1]}".strip()
+                if not value:
+                    break
+                value = value
+        if value:
+            logger.warning(f"unrecognized item in albums info: {value}")
+        return info
+
     def _extract_blog_info(self, root: etree.Element) -> bool:
         """ extract information from content of a blog note """
         section = 'start'
-        album_info_old = None
+        albumold_title = None
         for node in root.getchildren():
-            if node == root:
-                continue
 
             if node.tag == 'div' and self._is_empty(node):
                 # ignore empty divs, they are for readability only
@@ -398,7 +434,7 @@ class BlogInfo:
                 if node.tag == 'div':
                     self.text_at_start.append(xml)
                     continue
-                else: # e.g. ul,
+                else:  # e.g. ul,
                     raise ValueError("unexpected text in start section")
 
             if section == 'images':
@@ -432,7 +468,7 @@ class BlogInfo:
                         else:
                             self.text_after_images.append(text_after)
                         continue
-                #elif node.tag == 'ul':
+                # elif node.tag == 'ul':
                 #    self.text_after_images.append(self._extract_xml(node))
                 elif node.tag == 'hr':
                     section = 'status'
@@ -517,12 +553,17 @@ class BlogInfo:
                         section = 'galleries'
                         continue
 
-                    # assumedly an old style album list
+                    # have old style album list
+                    section = 'albumsold'
+
+                elif node.tag == 'h4':
+                    # have old style album list
                     section = 'albumsold'
 
                 elif node.tag == 'ul':
                     self._extract_albums(node)
                     continue
+
                 elif node.tag == 'hr':
                     section = 'galleries'
                     continue
@@ -531,31 +572,35 @@ class BlogInfo:
                 if node.tag == 'div':
                     div_text = self._extract_node_text(node)
                     if div_text == '':
-                        album_info_old = None
+                        albumold_title = None
                         continue  # skip empty lines
 
-                    if ' views' in div_text:  # photos, videos, ...
-                        assert album_info_old is not None
-                        self.albums.append(f"{album_info_old} | {div_text}")
-                        album_info_old = None
+                    album_info = self._extract_albumold_item_info(div_text)
+                    if album_info:
+                        assert albumold_title is not None
+                        album_info['title'] = albumold_title
+                        self.albums.append(album_info)
+                        albumold_title = None
                         continue
 
-                    if div_text not in ('.', ):
+                    if div_text not in ('.',):
                         logger.warning(f"ignored text in old album section: {div_text!r}")
                     continue
 
                 elif node.tag in ('h4',):
+                    # title line for album
                     div_text = self._extract_node_text(node)
-                    assert album_info_old is None, f"troubles extracting album info (old style), " \
-                                                   f"see {album_info_old} | {div_text}"
-                    album_info_old = div_text
+                    assert albumold_title is None, f"troubles extracting album info (old style), " \
+                                                   f"see {albumold_title} | {div_text}"
+                    albumold_title = div_text
                     continue
 
                 elif node.tag == 'hr':
                     section = 'galleries'
                     continue
+
                 else:
-                    assert False
+                    raise ValueError(f"old style album list, unhandled element {node.tag}")
 
             if section == 'galleries':
                 # note this section is optional
@@ -582,7 +627,7 @@ class BlogInfo:
                     node_text = self._extract_node_text(node)
                     if node_text.startswith('Galleries'):
                         # for a yet unknown reason lxml repeats section # HACK
-                        #assert len(self.galleries) > 0 or self.galleries is None
+                        # assert len(self.galleries) > 0 or self.galleries is None
                         raise ValueError(f"troubles with galleries extraction")
                     if node_text == '.':
                         continue
@@ -608,7 +653,6 @@ class BlogInfo:
     def generate(self):
         """ generate html content for a blog note """
         return None  # TODO future
-
 
 # TODO
 # Alan Cressler | alan_cressler | 7449293@N02 | Flickr blog
