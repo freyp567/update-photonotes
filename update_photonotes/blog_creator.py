@@ -27,11 +27,14 @@ import hashlib
 from lxml import etree
 
 # from flickr_types import FlickrImage  # FUTURE, to lookup photo notes
-from .database import PhotoNotesDB
+from .database import PhotoNotesDB, lookup_note
 from . import utils
+from .note_utils import Note2
+from .blog_info import BlogInfo
 
 import flickr_api
 from flickr_api.objects import Photo, Person
+from .flickr_types import FlickrPhotoBlog, FlickrDate
 from . import flickr_utils
 
 import requests
@@ -95,6 +98,7 @@ class BlogCreator:
         flickr_api.enable_cache(
             self.api_cache
         )
+        # main entry: see create_note
 
     def get_recent_photo(self, user: Person) -> tuple:
         photo = user.getPhotos(page=1)[0]
@@ -238,6 +242,7 @@ class BlogCreator:
             updated = datetime.datetime.fromtimestamp(int(gal_item['date_update'])).isoformat()[:10]
             count_photos = f"{photo_count:,}".replace(',', '.')
             gal_info = f"{gal_title} | {gal_id} | #={count_photos} c={created} u={updated}"
+            # TODO count videos / media  m=
             gal_items.append(f"<li>{gal_info}</li>")
 
         if gal_items:
@@ -247,7 +252,7 @@ class BlogCreator:
             self.params['gallery_list'] = "<div><span>No galleries</span></div>"
         return
 
-    def get_albums(self, user: Person) -> None:
+    def get_albums(self, user: Person, blog: Optional[BlogInfo]) -> None:
         """ get list of albums for user """
         self.params['albums_list'] = ''
         albums_list = []
@@ -266,13 +271,47 @@ class BlogCreator:
             updated = datetime.datetime.fromtimestamp(int(album.date_update)).isoformat()[:10]
             count_photos = f"{photo_count:,}".replace(',', '.')
             album_info = f"{album_title} | #={count_photos} u={updated}"
-            album_items.append(f"<li>{album_info}</li>")
+            if album.count_videos > 0:
+                logger.debug(f"detecteed videos={album.count_videos}")  # TODO count videos as m=
+            if blog is not None:
+                # detect and report updates
+                entry = [alb for alb in blog.albums if alb['title'] == album.title]
+                if entry:
+                    if len(entry) > 1:
+                        # e.g. Photoset(id=b'72157631270343878', title=b'Uploads')
+                        #  and Photoset(id=b'72157713761603561', title=b'Uploads')
+                        # for Person(id=b'73838904@N04', username=b'ajecaldwell11')
+                        logger.warning(f"detected non-unique photoset title {album.title!r}")
+                        album_info += ' | (not unique)'
+                    else:
+                        entry = entry[0]
+                        if photo_count and photo_count != entry.get('#'):
+                            album_info += f" | updated: #={entry.get('#') - photo_count}"
+                else:
+                    # new album? (or lookup issue)
+                    album_info += ' | new'
+            if ' | updated' in album_info or ' | new' in album_info:
+                album_items.append(f"<li><b>{album_info}</b></li>")
+            else:
+                album_items.append(f"<li>{album_info}</li>")
 
         if album_items:
             self.params['albums_list'] = "<ul>%s</ul>" % "\n".join(album_items)
         else:
             self.params['albums_list'] = "<div><span>No albums</span></div>"
         return
+
+    def lookup_blognote(self, blog_id: str) -> FlickrPhotoBlog|None:  ## TODO BlogNote
+        blog_key = f"{blog_id}"
+        try:
+            found = self.notes_db.flickrblogs.lookup_blog_by_id(blog_key)
+        except ValueError as exc:   #PhotoBlogNotFound:
+            logger.info(f"no blog-note found for key={blog_key}")
+            return None
+        else:
+            logger.info(f"found blog-note for {blog_key}")
+            return found
+
 
     def create_note(self, flickr_url: str) -> bool:
         logger.info(f"create blognote for {flickr_url}")
@@ -295,9 +334,24 @@ class BlogCreator:
         if not user:
             raise ValueError(f"user not found by url={flickr_url}")
 
+        # lookup blog note in photonotes db
+        blog_note = self.lookup_blognote(blog_id)  # vs blog_id
+        if blog_note is not None:
+            note = lookup_note(self.notes_db.store, blog_note.guid_note)
+            blog = BlogInfo()
+            blog_ok = blog.extract(Note2(note))
+            blog.date_verified = FlickrDate.today()
+            # update blog object and flickrblog entry in db, field date_verified
+            self.notes_db.flickrblogs.update_blog(blog)
+        else:
+            logger.info(f"lookup blog note failed for {blog_id!r}")
+            blog = None
+            blog_ok = None
+
         user_data.write_text(json.dumps(user.__dict__, indent=4, default=str), encoding='utf-8')
         # user_info = SimpleNamespace(**json.loads(user_data.read_text()))
-        logger.info(f"lookup by url succeeded, user for {blog_id} is {user.id} / {user.username}")
+        logger.info(f"lookup by url succeeded, user for {blog_id} is {user.id} / {user.username}"
+                    f" (blog in db: {blog.blog_latest_update if blog else '(missing)'}, ok={blog_ok!r})")
 
         # summary for user / blog
         now = datetime.date.today().isoformat()
@@ -307,7 +361,7 @@ class BlogCreator:
             blog_info = f"{now}: #={count_photos},  t={last_taken},  u={last_upload}"
         else:
             blog_info = f"{now}: #={count_photos},  u={last_upload}"
-
+        # TODO count videos / media  m=
         self.get_description(user)
 
         # provide additional tags for blog note
@@ -350,7 +404,7 @@ class BlogCreator:
         })
 
         self.params['blog_link'] = f'<a href="{flickr_url}">\n{flickr_url}\n</a>'
-        self.get_albums(user)
+        self.get_albums(user, blog)
         self.get_galleries(user, extra_tags)
 
         self.fetch_blog_thumbnail(blog_id, photo)

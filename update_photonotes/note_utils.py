@@ -25,6 +25,10 @@ class Note2(Note):
         value += ')'
         return value
 
+    @property
+    def title(self) -> str:
+        return self.en_note.title
+
     def date_updated(self) -> datetime.date:
         value = datetime.datetime.fromtimestamp(self.en_note.updated / 1000.0).date()
         return value

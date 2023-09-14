@@ -3,7 +3,8 @@ Encapsulates update handling
 """
 
 import os
-import datetime
+from datetime import datetime, date, timedelta
+import re
 from pathlib import Path
 from typing import Optional
 from lxml import etree
@@ -14,9 +15,10 @@ from evernote_backup.note_exporter_util import SafePath
 from evernote.edam.type.ttypes import Note
 
 
+from .blog_info import BlogInfo
 from .flickr_utils import is_flickr_url
 from .conversion import get_note_content
-from .flickr_types import FlickrPhotoNote, FlickrDate
+from .flickr_types import FlickrPhotoNote, FlickrDate   # FlickrPhotoBlog
 from .database import PhotoNotesDB, lookup_note
 from .exceptions import NoteNotFound,  PhotoNoteNotFound
 from .note_utils import Note2
@@ -77,29 +79,38 @@ class NotesUpdater:
         logger.info(f"updated notebook: {processed} ")
         return
 
-    def _need_update_blog(self, blog_note) -> bool:
-        """ verify content of blog note """
-        content = get_note_content(blog_note.content)
+    def _update_blog(self, blog: BlogInfo) -> str:
+        """ update content of blog note - rturns updated note or None if no update requireed """
         try:
-            xml = etree.fromstring(content)
-            for anchor in xml.xpath('//a'):
-                href = anchor.attrib.get("href")
-                if 'flickr.com' not in href:
-                    continue
-                if href.startswith(FLICKR_PHOTO_URL):
-                    # 'href': 'https://www.flickr.com/photos/27297062@N02/51089206529/in/pool-inexplore/',
-                    # ..., 'rev': 'en_rl_none', 'target': '_blank'}
-                    self._handle_image_link(blog_note, href)
-                else:
-                    logger.debug(f"ignored href={href!r}")
+            # TODO verify blog_update and blog_latst_update, should match - normally
 
-            # 'www.flickr.com/people/'
-            if 'www.flickr.com/photos' not in content_text:
-                return False
-            return True
-        except Exception as err:
-            logger.exception('update check failed')
-        return False
+            # check and update the blog info
+            if blog.timestamp:
+                age = datetime.now() - blog.timestamp
+            else:
+                logger.warning(f"missing timestamp in blog note")
+                if blog.note_updated:
+                    age = datetime.now() - blog.note_updated
+                else:
+                    age = timedelta(days=NO_UPDATE_AGE)
+
+            if age < timedelta(days=NO_UPDATE_AGE):
+                # check if update is required
+                force_update = False
+                if not blog.timestamp:
+                    # old style blog without timesgtamp, requirres renewal
+                    force_update = True
+                if not force_update:
+                    return None
+
+            updated_content = blog.generate()
+            return updated_content
+        except ValueError as exc:
+            logger.error(f'update_blog failed - {exc}')
+        except Exception as exc:
+            logger.exception(f'update_blog failed - {exc}')
+            return None
+        return None
 
     def _extract_see_v1(self, xml, note: Note):
         """
@@ -599,7 +610,7 @@ found see:
             note2 = Note2(note)
 
             if not note.tagNames:
-                logger.warning(f'ignore note {self.pos} without tags: {note2}')
+                logger.warning(f'ignore note {self.pos} without tags: {note2.title!r}')
                 continue  # ignore notes without tags
 
             if 'inaccessible' in note.tagNames:  ##TODO make configurable
@@ -629,10 +640,10 @@ found see:
                     continue
 
                 if note.deleted is not None:
-                    logger.debug(f"ignore deleted note {note2}")
+                    logger.info(f"ignore deleted note {note2}")
                     continue
 
-                # for debugging, it is somethimes useful to be able to pick a photo-note by title
+                # for debugging, it is sometimes useful to be able to pick a photo-note by title
                 if self.options.note_title and self.options.note_title not in note.title:
                     continue
                 handler(note2, export_enex)
@@ -640,24 +651,50 @@ found see:
 
         return
 
-    def _update_flickr_blog(self, note: Note, export_enex: bool):
-        """ analyze and uodae blog note """
-        note_content = get_note_content(note.content)
+    def _update_flickr_blog(self, note: Note2, export_enex: bool):
+        """ analyze and update blog note """
+        # TODO use throttling, ensuring no more than (.limit) notes per (interval)
 
-        # check if note needs update
-        if self._need_update_blog(note):
-            self.count += 1
-            # TODO implement proper throttling, ensuring no more than (.limit) notes per (interval)
-            if self.count > self.limit:
-                logger.warning(f"reached notes limit")
-                return
+        blog = BlogInfo()
+        if not blog.extract(note):
+            logger.debug(f"blog info extraction from note incomplete")
 
-            if export_enex:
-                # export as enex for reimport to Evernote
-                # TODO evaluate/decide:
-                #    can we update existing note from .enex or should we rather use the Evernote API?
-                logger.debug(f"Exporting note {note.title!r} updated={note.updated}")
-                _write_export_file(note_path, note)
+        # use FlickrPhotoBlog?
+        if blog.blog_id is not None:
+            # update record in database if blog could be identified
+            self.notes_db.flickrblogs.update_blog(blog)
+
+        if blog.timestamp is None:
+            # extraction of blog info not fully successfull - old style or incomplete
+            return
+
+        # update note content
+        note_content = self._update_blog(blog)
+        if note_content is None:
+            # no update or unable to update
+            return
+
+        self.count += 1
+
+        # export old note for recovery / verification
+        # if export_enex:  # ignore for time beeing, export is compulsory at current development stage
+        # group exports by year/month for easier handling / lookup
+        export_path = self.base_path / "export" / datetime.now().strftime("%Y-%m")
+        blog_title = note.title
+        match = re.search(r'\| (\d{8-10}@N\d{2) \|')
+        if match is None:
+            raise ValueError(f"lookup blog-id in note title failed for {blog_title}")
+        blog_id = match.group(1)
+        updated = note.date_updated().strftime("%Y-%m-%d")
+        note_path = export_path / f"{blog_id}.{updated}.enex"
+        logger.debug(f"Exporting note {note.title!r} updated={note.updated}")
+        _write_export_file(note_path, note)
+
+        # TODO create new .enex for import with updated content
+
+        if self.count > self.limit:  # preliminary, limit number of notes updated in one run
+            raise RuntimeError(f"reached notes limit ({self.limit})")
+        return
 
     def _update_flickr_image(self, note: Note2, export_enex: bool) -> None:
         """ examine and update photo-note """
@@ -685,8 +722,8 @@ found see:
                 update_flickr_info = True
             elif photo_note.entry_updated:
                 # photo note entry from db, check when it got last updated (or created)
-                age = photo_note.entry_updated.value - datetime.date.today()
-                if age < datetime.timedelta(days=NO_UPDATE_AGE):
+                age = photo_note.entry_updated.value - date.today()
+                if age < timedelta(days=NO_UPDATE_AGE):
                     # avoid updating notes that have been updated recently
                     update_flickr_info = False
                 else:
@@ -732,7 +769,7 @@ found see:
                 stacked_link = pnote_info['all'][image_key]
                 self.notes_db.flickrimages.update_image(
                     pnote_info['photo_note'], stacked_link,
-                    is_primary = False,
+                    is_primary=False,
                     log_changes=debug
                 )
 

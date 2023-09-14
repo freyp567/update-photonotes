@@ -249,5 +249,5 @@ def main() -> None:
         logger.critical(f"Rate limit reached. Restart program in {time_left}.")
         sys.exit(4)
     except Exception as err:
-        logger.exception("updater failed - {err!r}")
+        logger.exception(f"updater failed - {err!r}")
         sys.exit(1)
