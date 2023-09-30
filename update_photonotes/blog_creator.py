@@ -272,7 +272,7 @@ class BlogCreator:
             count_photos = f"{photo_count:,}".replace(',', '.')
             album_info = f"{album_title} | #={count_photos} u={updated}"
             if album.count_videos > 0:
-                logger.debug(f"detecteed videos={album.count_videos}")  # TODO count videos as m=
+                album_info += f' m={album.count_videos}'
             if blog is not None:
                 # detect and report updates
                 entry = [alb for alb in blog.albums if alb['title'] == album.title]
@@ -287,9 +287,11 @@ class BlogCreator:
                         entry = entry[0]
                         if photo_count and photo_count != entry.get('#'):
                             album_info += f" | updated: #={entry.get('#') - photo_count}"
-                else:
-                    # new album? (or lookup issue)
+                elif blog.albums:
+                    # new album? (or lookup issue) - only if there is at least one, i.e. list could be loaded
                     album_info += ' | new'
+                else:
+                    pass
             if ' | updated' in album_info or ' | new' in album_info:
                 album_items.append(f"<li><b>{album_info}</b></li>")
             else:
@@ -335,7 +337,10 @@ class BlogCreator:
             raise ValueError(f"user not found by url={flickr_url}")
 
         # lookup blog note in photonotes db
-        blog_note = self.lookup_blognote(blog_id)  # vs blog_id
+        blog_note = self.lookup_blognote(user.id)
+        if blog_note is None:
+            blog_note = self.lookup_blognote(blog_id)
+
         if blog_note is not None:
             note = lookup_note(self.notes_db.store, blog_note.guid_note)
             blog = BlogInfo()

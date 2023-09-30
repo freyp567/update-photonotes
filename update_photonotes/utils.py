@@ -116,3 +116,13 @@ def get_mimetype(img_suffix: str) -> str:
     else:  # what else?
         logger.warning(f"detected unknown image suffix {img_suffix}")
         return f"image/{img_suffix}"
+
+
+def get_int_value(value: str) -> int | None:
+    if '.' in value:
+        # thousands separators, decoracted for better readability
+        value = value.replace('.', '')
+    try:
+        return int(value)
+    except ValueError:
+        return None

@@ -697,7 +697,8 @@ photos_info:
                 # have more new photos than what cache can hold - increase it
                 self._lookup_cache.drop_cache(user)
                 self._lookup_cache.flag_large_site(user)
-                raise ValueError(f"detected user has more than {per_page} new images - set large site mode")
+                logger.warning(f"detected user has more than {per_page} new images - change to use large site mode")
+                raise ValueError(f"please retry note creation, configuration got changed")
             else:
                 logger.warning(f"extra large size with more than 500 additions !!")
             new_photos = f"+(more than {len(photos)})"

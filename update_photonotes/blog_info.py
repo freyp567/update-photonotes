@@ -50,6 +50,7 @@ from lxml import etree
 
 from .note_utils import Note2
 from .conversion import get_note_content
+from .utils import get_int_value
 
 import logging
 
@@ -317,7 +318,7 @@ class BlogInfo:
     def _extract_albums(self, node: etree.Element) -> None:
         assert node.tag == 'ul'
         for subnode in node.getchildren():
-            assert subnode.tag == 'li'
+            assert subnode.tag == 'li', "expect list item for album list"
             info = self._extract_node_text(subnode)
             # split into parts
             # e.g. 'Blumen Flower | #=379 u=2023-04-22'
@@ -325,16 +326,22 @@ class BlogInfo:
             if len(props) < 2:
                 raise ValueError(f"cannot interpret album info: {info!r}")
             elif len(props) > 2:
-                album_title = '|'.join(props[:-1])
-                extras = '|'.join(props[2:])
-                props = props[1].strip()
+                # album title may have '|', handle properly
+                pos = [ pos for pos,p in enumerate(props) if p.strip().startswith('#')]
+                if len(pos) != 1:
+                    # unable to determine album info (photo count, ...)
+                    raise ValueError(f"unable to exgtract album info from title: {info!r}")
+                pos = pos[0]
+                album_title = '|'.join(props[:pos])
+                extras = '|'.join(props[pos+1:])
+                props = props[pos].strip()
             else:
                 album_title = props[0]
                 props = props[1].strip()
                 extras = ''
 
             album_info = self._extract_album_item_info(props)
-            album_info['title'] = album_title
+            album_info['title'] = album_title.strip()
             if extras:
                 album_info['extras'] = extras
             self.albums.append(album_info)
@@ -361,7 +368,7 @@ class BlogInfo:
                 value = self._extract_isodate_text(value)
                 value = value.date()
             elif key == '#':
-                value = int(value)
+                value = get_int_value(value)
             else:
                 value = value
             info[key] = value
@@ -378,23 +385,29 @@ class BlogInfo:
             ('views', 'v'),
             ('view', 'v'),
         ]
-        value = value.replace('\xb7', ' ')
+        value2 = value.replace('\xb7', ' ')
         for keyword, key in keywords:
-            if keyword in value:
-                parts = value.split(keyword)
+            if keyword in value2:
+                parts = value2.split(keyword)
                 assert len(parts) == 2
                 part0 = parts[0].strip()
                 pos = len(part0)
-                while pos > 0 and part0[pos-1:].isdigit():
+                while pos > 0 and (part0[pos-1].isdigit() or part0[pos-1] in (',', '.')):
                     pos -= 1
-                info[key] = int(part0[pos:])
+                count = part0[pos:]
+                if not count.isdigit():
+                    # normalize int value
+                    count = count.replace(',', '')
+                    count = count.replace('.', '')
+                    assert count.isdigit(), f"unexpected int value: {count} in {value!r}"
+                info[key] = int(count)
                 part0 = part0[:pos]
-                value = f"{part0} {parts[1]}".strip()
-                if not value:
+                value2 = f"{part0} {parts[1]}".strip()
+                if not value2:
                     break
-                value = value
-        if value:
-            logger.warning(f"unrecognized item in albums info: {value}")
+                value2 = value2
+        if value2:
+            logger.warning(f"unrecognized item in albums info: {value2} - {value!r}")
         return info
 
     def _extract_blog_info(self, root: etree.Element) -> bool:
@@ -613,6 +626,7 @@ class BlogInfo:
                         section = 'theend'
                         continue
                     else:
+                        # we expect timestamp at end of note
                         section = 'theend'
                 elif node.tag == 'ul':
                     self._extract_galleries(node)
@@ -646,6 +660,8 @@ class BlogInfo:
 
             xml = self._extract_xml(node)
             # this can happen for old-style blog notes, with list of albums not formatted as list
+            # happens also if note is incomplete, e.g. missing essential parts (list of albums)
+            # or status section is missing (e.g. in very old blog notes)
             raise ValueError(f"detected unhandled element in {section}:\n  {xml}")
 
         return True
