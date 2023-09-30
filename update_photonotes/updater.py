@@ -613,9 +613,10 @@ found see:
                 logger.warning(f'ignore note {self.pos} without tags: {note2.title!r}')
                 continue  # ignore notes without tags
 
-            if 'inaccessible' in note.tagNames:  ##TODO make configurable
-                logger.debug(f'skip inaccessible note: {note2}')
-                continue
+            for ignore_tag in self.options.ignore_tags.split(','):
+                if ignore_tag in note.tagNames:
+                    logger.debug(f'skip note tagged {ignore_tag}: {note2}')
+                    continue
 
             if self.options.tag_name and self.options.tag_name not in note.tagNames:
                 logger.info(f"skip note {self.pos} not having desired tag name")

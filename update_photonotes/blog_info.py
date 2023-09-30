@@ -470,9 +470,8 @@ class BlogInfo:
                 if node.tag == 'div':
                     updated = self._extract_blog_updates(node)
                     if updated is not None:
-                        if not self.blog_latest_update:
-                            self.blog_latest_update = updated
-                        continue
+                        section = 'blogupdates'
+                        # fall through to next section handled below
                     else:
                         # text after image / more image section
                         text_after = self._extract_xml(node)
@@ -481,11 +480,30 @@ class BlogInfo:
                         else:
                             self.text_after_images.append(text_after)
                         continue
-                # elif node.tag == 'ul':
-                #    self.text_after_images.append(self._extract_xml(node))
+                elif node.tag == 'ul':
+                    self.text_after_images.append(self._extract_xml(node))
+                    continue
+                elif node.tag == 'hr':
+                    # missing blogupdatges??
+                    section = 'status'
+                    continue
+                else:
+                    node = node  # what else?
+
+            if section == 'blogupdates':
+                if node.tag == 'div':
+                    updated = self._extract_blog_updates(node)
+                    if updated is None:
+                        raise ValueError(f"invalid entry in section blugupdates")
+                    if not self.blog_latest_update:
+                        self.blog_latest_update = updated
+                    continue
                 elif node.tag == 'hr':
                     section = 'status'
                     continue
+                else:
+                    node = node
+
 
             if section == 'status':
                 if node.tag == 'div':
@@ -587,6 +605,11 @@ class BlogInfo:
                     if div_text == '':
                         albumold_title = None
                         continue  # skip empty lines
+
+                    if div_text == '.':
+                        # a single dot on a line indicates end of note
+                        section = 'theend'
+                        continue
 
                     album_info = self._extract_albumold_item_info(div_text)
                     if album_info:

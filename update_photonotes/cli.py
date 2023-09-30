@@ -96,6 +96,12 @@ def reset_db():
     required=False,
 )
 @click.option(
+    '--ignore-tags',
+    default="inaccessible",
+    required=False,
+    help="list of tags (comma separeted) to ignore notes for"
+)
+@click.option(
     '--note-title',
     required=False,
 )
@@ -117,12 +123,14 @@ def update_db(
         notebook: str,
         limit: int,
         skip: int = 0,
+        ignore_tags: str = "",
         tag_name: Optional[str] = None,
         note_title: str = None
 ) -> None:
     """ Create photonote either from url passed or the one passed on clipboard """
     options = SimpleNamespace()
     options.tag_name = tag_name
+    options.ignore_tags = ignore_tags
     options.export_dir = None
     options.limit = limit
     options.skip = skip
