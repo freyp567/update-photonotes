@@ -118,7 +118,7 @@ def get_license_info(photo: Photo) -> str:
         '4': 'CC BY 2.0',
         '5': 'CC BY-SA 2.0',
         '6': 'CC BY-ND 2.0',
-        # '7': 'License Type 7',
+        '7': 'No Copyright',
         # '8': 'License Type 8',
         '9': 'CC0 1.0 Public Domain',
         '10': 'Public Domain Mark 1.0',
