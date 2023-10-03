@@ -82,6 +82,7 @@ class BlogInfo:
         self.albums = []  # flickr photosets
         self.galleries = []
         self.timestamp = None
+        self.note_tags = None
 
     def extract(self, note: Note2) -> bool:
         self.note_title = note.title
@@ -93,8 +94,11 @@ class BlogInfo:
         elif len(user_id) == 1:
             self.user_id = user_id[0]
         else:
-            logger.error(f"unable to determine userid from title {note.title}")
-            raise ValueError("failed to determine user id from note title")
+            # e.g. '' @Jarmila | jarmi7d | 53501538@N06 | Flickr blog'
+            user_id = user_id[-1]
+            assert '@N' in user_id, f"invalid user id: {user_id} in {note.title}"
+            self.user_id = user_id
+
         self.guid_note = note.en_note.guid
         self.note_tags = note.en_note.tagNames
         logger.debug(f"updating blog note {self.note_title!r} ...")
@@ -475,10 +479,7 @@ class BlogInfo:
                     else:
                         # text after image / more image section
                         text_after = self._extract_xml(node)
-                        if text_after == '<div>...</div>':
-                            pass
-                        else:
-                            self.text_after_images.append(text_after)
+                        self.text_after_images.append(text_after)
                         continue
                 elif node.tag == 'ul':
                     self.text_after_images.append(self._extract_xml(node))
@@ -504,7 +505,6 @@ class BlogInfo:
                 else:
                     node = node
 
-
             if section == 'status':
                 if node.tag == 'div':
                     div_text = self._extract_node_text(node)
@@ -518,9 +518,12 @@ class BlogInfo:
                 elif node.tag == 'hr':
                     section = 'bloginfo'
                     continue
+                else:
+                    node = node  # to set breakpoint
 
             if section == 'bloginfo':
                 if node.tag == 'div':
+                    blog_text = self._extract_xml(node)
                     blog_link = [el for el in node.getchildren() if el.tag == 'a']
                     if blog_link:
                         blog_link = blog_link[0]
@@ -539,7 +542,7 @@ class BlogInfo:
                                 raise ValueError("expect flickr url to blog or photo stream")
                             self.blog_id = parts[1].split('/')[0]
 
-                    self.bloginfo_xml.append(self._extract_xml(node))
+                    self.bloginfo_xml.append(blog_text)
                     continue
                 elif node.tag == 'en-media':
                     self.bloginfo_xml.append(self._extract_xml(node))
@@ -565,6 +568,8 @@ class BlogInfo:
                         if etree.tostring(node.getnext()) != b'<div><br/></div>':
                             self.blogdesc_xml.append(self._extract_xml(node))
                         continue
+                else:
+                    node = node
 
             if section == 'blogprops':
                 if node.tag == 'ul':
@@ -609,6 +614,10 @@ class BlogInfo:
                     if div_text == '.':
                         # a single dot on a line indicates end of note
                         section = 'theend'
+                        continue
+
+                    if div_text == 'View collections':
+                        # ignore
                         continue
 
                     album_info = self._extract_albumold_item_info(div_text)
