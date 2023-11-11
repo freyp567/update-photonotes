@@ -9,6 +9,14 @@
 
 ## Version History and Changes
 
+### 0.9.2
+### Improvements
+- Improvements to note and blog note creation
+- Accept license type 7 - no copyright
+- Fix determining userid from title with extra ampersands
+- Add option --ignore-tags to exclude some notes from update
+- Various fixes to note and blog handling
+
 ### 0.9.1
 ### Maintenance
 - update package versions (lxml -> 4.9.3, request -> 2.31.0, urllib3 -> 2.0.4, ...)
