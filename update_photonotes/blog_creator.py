@@ -248,11 +248,11 @@ class BlogCreator:
         if gal_items:
             extra_tags.append("blog_galleries")
             gallery_list = "<ul>%s</ul>" % "\n".join(gal_items)
-            self.params['gallery_block'] = """\
+            self.params['gallery_block'] = f"""\
 <div>
     <span style="color:rgb(0, 0, 0);">Galleries:</span>
 </div>
-${gallery_list}
+{gallery_list}
 <div>
     <br/>
 </div>
