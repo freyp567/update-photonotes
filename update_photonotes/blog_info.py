@@ -92,7 +92,7 @@ class BlogInfo:
         if len(user_id) == 0:
             self.user_id = None
         elif len(user_id) == 1:
-            self.user_id = user_id[0]
+            self.user_id = user_id[0].strip()
         else:
             # e.g. '' @Jarmila | jarmi7d | 53501538@N06 | Flickr blog'
             user_id = user_id[-1]
@@ -154,7 +154,9 @@ class BlogInfo:
     def _extract_images(self, node: etree.Element) -> None:
         if node.tag != 'ul':
             # old style image list (using sequence of divs => manual fixup
-            raise ValueError(f"expect list of images, got {node.tag}")
+            # or empty image list
+            logger.warning(f"missing list of images for blog note {self.note_title}")
+            return
         for item in node.getchildren():
             assert item.tag == 'li'
             info = item.getchildren()
@@ -371,7 +373,7 @@ class BlogInfo:
             if key in ('u',):
                 value = self._extract_isodate_text(value)
                 value = value.date()
-            elif key == '#':
+            elif key in ('#', 'm'):
                 value = get_int_value(value)
             else:
                 value = value

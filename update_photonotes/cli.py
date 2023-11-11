@@ -19,7 +19,8 @@ from click_option_group import MutuallyExclusiveOptionGroup, optgroup
 # extending evernote-backup
 from evernote_backup.cli_app_util import ProgramTerminatedError
 from evernote.edam.error.ttypes import EDAMErrorCode, EDAMSystemException
-from evernote_backup.log_util import get_time_txt, init_logging, init_logging_format
+from evernote_backup.log_util import get_time_txt, init_logging  #, init_logging_format
+from . import log_config
 from evernote_backup.cli_app_click_util import (
     DIR_ONLY,
     FILE_ONLY,
@@ -33,8 +34,9 @@ from update_photonotes.log_config import setup_logging
 from . import utils
 from . import cli_app
 
-setup_logging()
-logger = logging.getLogger('updater')
+#setup_logging()
+logger = logging.getLogger('app.cli')
+
 
 @click.group(cls=NaturalOrderGroup)
 @optgroup.group("Verbosity", cls=MutuallyExclusiveOptionGroup)  # type: ignore
@@ -61,7 +63,9 @@ def updater(quiet:bool, verbose:bool) -> None:
     """
 
     init_logging()
-    init_logging_format()
+    # init_logging_format()  # not the log format we want, but ...
+    log_config.setup_logging()
+    logger.info(f"running update_photonotes ...")
 
     if quiet:
         logger.setLevel(logging.ERROR)
