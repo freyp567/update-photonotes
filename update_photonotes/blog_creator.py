@@ -247,9 +247,18 @@ class BlogCreator:
 
         if gal_items:
             extra_tags.append("blog_galleries")
-            self.params['gallery_list'] = "<ul>%s</ul>" % "\n".join(gal_items)
+            gallery_list = "<ul>%s</ul>" % "\n".join(gal_items)
+            self.params['gallery_block'] = """\
+<div>
+    <span style="color:rgb(0, 0, 0);">Galleries:</span>
+</div>
+${gallery_list}
+<div>
+    <br/>
+</div>
+"""
         else:
-            self.params['gallery_list'] = "<div><span>No galleries</span></div>"
+            self.params['gallery_block'] = "<!-- no galleries -->"
         return
 
     def get_albums(self, user: Person, blog: Optional[BlogInfo]) -> None:

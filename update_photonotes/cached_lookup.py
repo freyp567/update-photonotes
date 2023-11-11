@@ -69,8 +69,7 @@ class CachedLookupPhoto:
         }
         return info
 
-    def _store_cache(self, user_id, photo_infos):
-        data_path = self.cache_dir / (user_id + '.json')
+    def _store_cache_imp(self, user_id, photo_infos, data_path):
         info = {
             'written': datetime.now().isoformat(),
             'size': len(photo_infos),
@@ -86,6 +85,15 @@ class CachedLookupPhoto:
             info['last_upload'] = ''
         data_path.write_text(json.dumps(cached, indent=4))
 
+    def _store_cache_backup(self, user_id, photo_infos):
+        today_ts = datetime.now().strftime('%Y-%m-%d')
+        data_path = self.cache_dir / f"{user_id}.{today_ts}.json"
+        self._store_cache_imp(user_id, photo_infos, data_path)
+
+    def _store_cache(self, user_id, photo_infos):
+        data_path = self.cache_dir / (user_id + '.json')
+        self._store_cache_imp(user_id, photo_infos, data_path)
+
     def update_cache(self, user: Person, photos: FlickrList) -> None:
         """ update cache from photolist """
         self._load_cache(user.id)
@@ -93,7 +101,7 @@ class CachedLookupPhoto:
         if self.photos is None:
             # empty cache, simply dump list
             self._store_cache(user.id, updates)
-            logger.info(Back.YELLOW + f"setup cache for {user.id}, added {len(photos)} images" + Style.RESET_ALL)
+            logger.info(Back.LIGHTBLUE_EX + f"setup cache for {user.id}, added {len(photos)} images" + Style.RESET_ALL)
             self.photos = None  # force reload on next access
             return 0
 
@@ -127,6 +135,7 @@ class CachedLookupPhoto:
                     'taken': datetime.now().isoformat(),
                     'uploaded': '*',
                 })
+                self._store_cache_backup(user.id, new_photos)
                 pos = -1  # indicate pos undetermined
 
             self.photos = new_photos

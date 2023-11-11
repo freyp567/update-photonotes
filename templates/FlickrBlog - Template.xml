@@ -54,13 +54,7 @@ ${blog_props}
 		</div>
 ${albums_list}
 		<hr/>
-		<div>
-			<span style="color:rgb(0, 0, 0);">Galleries:</span>
-		</div>
-${gallery_list}
-		<div>
-			<br/>
-		</div>
+${gallery_block}
 		<div style="text-align:start;">
 			<span style="color:rgb(0, 0, 0);">${timestamp}</span>
 		</div>
