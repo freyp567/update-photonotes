@@ -391,7 +391,8 @@ class BlogCreator:
             parts = [ user.username, blog_id, ]
         if blog_id != user.id:
             parts.append(user.id)
-        note_title = ' | '.join([p.strip() for p in parts if p.strip()]) + ' | Flickr blog'
+        note_title = '[blog] '
+        note_title += ' | '.join([p.strip() for p in parts if p.strip()])
         note_title = '[new] ' + utils.quote_xml(note_title)
         location = utils.get_safe_property(user, 'location', None)
         if not location:
