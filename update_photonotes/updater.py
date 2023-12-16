@@ -658,7 +658,7 @@ found see:
 
         blog = BlogInfo()
         if not blog.extract(note):
-            logger.debug(f"blog info extraction from note incomplete")
+            logger.debug(f"blog info extraction incomplete")
 
         # use FlickrPhotoBlog?
         if blog.blog_id is not None:

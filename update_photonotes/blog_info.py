@@ -51,6 +51,7 @@ from lxml import etree
 from .note_utils import Note2
 from .conversion import get_note_content
 from .utils import get_int_value
+from .exceptions import BlogNoteRequiresCleanup
 
 import logging
 
@@ -106,9 +107,15 @@ class BlogInfo:
         root = etree.fromstring(content)
         try:
             return self._extract_blog_info(root)
+
+        except BlogNoteRequiresCleanup as exc:
+            logger.error(f"{exc}")  # single line, for easier grepping
+            return False
+
         except ValueError as exc:
             logger.error(f"failed to extract blog info from {note.title!r}:\n  {exc}")
             return False
+
         except Exception as exc:
             logger.exception(f"failed to extract blog info from {note.title!r} - {exc}")
             return False
@@ -170,7 +177,11 @@ class BlogInfo:
             'before': [],
             'after': []
         }
-        assert node.tag == 'div'
+        if node.tag != 'div':
+            # DEBUG examine context: xml = self._extract_xml(node.getprevious())
+            logger.error(f"extract_moreimage failed, expect <div> but got <{node.tag}>")
+            raise BlogNoteRequiresCleanup(f"blog note requires cleanup (moreimages): {self.note_title}")
+
         pos = 'before'
         prefix = (node.text or '').strip()
         if prefix.startswith('see:'):
@@ -339,7 +350,7 @@ class BlogInfo:
                     raise ValueError(f"unable to exgtract album info from title: {info!r}")
                 pos = pos[0]
                 album_title = '|'.join(props[:pos])
-                extras = '|'.join(props[pos+1:])
+                extras = '|'.join(props[pos+1:]).strip()
                 props = props[pos].strip()
             else:
                 album_title = props[0]
@@ -349,6 +360,7 @@ class BlogInfo:
             album_info = self._extract_album_item_info(props)
             album_info['title'] = album_title.strip()
             if extras:
+                # e.g. 'updated: #=-79'
                 album_info['extras'] = extras
             self.albums.append(album_info)
 
@@ -453,8 +465,11 @@ class BlogInfo:
                 if node.tag == 'div':
                     self.text_at_start.append(xml)
                     continue
-                else:  # e.g. ul,
-                    raise ValueError("unexpected text in start section")
+                else:
+                    # e.g.  introductory 'images:' not found, e.g. because misspelled (as 'image:')
+                    xml = self._extract_xml(node)
+                    logger.error(f"unexpected text in start section: {xml}")
+                    raise BlogNoteRequiresCleanup(f"blog note requires cleanup (start): {self.note_title}")
 
             if section == 'images':
                 self._extract_images(node)
@@ -622,13 +637,17 @@ class BlogInfo:
                         # ignore
                         continue
 
-                    album_info = self._extract_albumold_item_info(div_text)
-                    if album_info:
-                        assert albumold_title is not None
-                        album_info['title'] = albumold_title
-                        self.albums.append(album_info)
-                        albumold_title = None
-                        continue
+                    if div_text in ('Galleries:',):
+                        section = 'galleries'
+
+                    else:
+                        album_info = self._extract_albumold_item_info(div_text)
+                        if album_info:
+                            assert albumold_title is not None
+                            album_info['title'] = albumold_title
+                            self.albums.append(album_info)
+                            albumold_title = None
+                            continue
 
                     if div_text not in ('.',):
                         logger.warning(f"ignored text in old album section: {div_text!r}")
@@ -696,7 +715,9 @@ class BlogInfo:
             # this can happen for old-style blog notes, with list of albums not formatted as list
             # happens also if note is incomplete, e.g. missing essential parts (list of albums)
             # or status section is missing (e.g. in very old blog notes)
-            raise ValueError(f"detected unhandled element in {section}:\n  {xml}")
+            # the best advice here is to recreate the blog note or clean up the old note
+            logger.error(f"detected unhandled element in {section}:\n  {xml}")
+            raise BlogNoteRequiresCleanup(f"blog note requires cleanup (unhandled): {self.note_title}")
 
         return True
 

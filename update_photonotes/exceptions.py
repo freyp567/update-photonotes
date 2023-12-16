@@ -23,3 +23,7 @@ class PhotoNoteNotFound(Exception):
 #     def __str__(self):
 #         error_msg = str(self)
 #         return error_msg
+
+
+class BlogNoteRequiresCleanup(Exception):
+    """ failed to extract infos from blog note, note requires cleanup """

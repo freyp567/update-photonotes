@@ -346,9 +346,9 @@ class BlogCreator:
             raise ValueError(f"user not found by url={flickr_url}")
 
         # lookup blog note in photonotes db
-        blog_note = self.lookup_blognote(user.id)
+        blog_note = self.lookup_blognote(blog_id)
         if blog_note is None:
-            blog_note = self.lookup_blognote(blog_id)
+            blog_note = self.lookup_blognote(user.id)
 
         if blog_note is not None:
             note = lookup_note(self.notes_db.store, blog_note.guid_note)
